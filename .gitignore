@@ -1,0 +1,49 @@
+# Environment — never commit secrets
+.env
+.env.*
+!.env.example
+
+# Node.js
+node_modules/
+.next/
+.npm/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+venv/
+env/
+.venv/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+*.egg
+.mypy_cache/
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Test coverage
+.coverage
+htmlcov/
+
+# Alembic versions (keep migrations, not cache)
+apps/python/alembic/versions/__pycache__/
