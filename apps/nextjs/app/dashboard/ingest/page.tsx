@@ -182,7 +182,7 @@ function LogConsole({ logs, running }: { logs: LogEvent[]; running: boolean }) {
 
 function HealthPanel() {
   const [health, setHealth] = useState<HealthStatus | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [seedRunning, setSeedRunning] = useState(false);
   const [seedResult, setSeedResult] = useState<{ inserted?: number; skipped?: number; error?: string } | null>(null);
 
@@ -190,6 +190,7 @@ function HealthPanel() {
     setLoading(true);
     try {
       const res = await fetch('/dashboard/api/ingest');
+      if (!res.ok) { setHealth(null); return; }
       setHealth(await res.json());
     } catch {
       setHealth(null);
