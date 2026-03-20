@@ -9,10 +9,28 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const { action, ...params } = body;
 
+    // Streaming RSS poll — proxy SSE directly
+    if (action === 'poll-stream') {
+      const res = await fetch(`${PYTHON_URL}/feed/poll-stream`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (!res.ok || !res.body) {
+        return NextResponse.json({ error: 'Stream failed' }, { status: 500 });
+      }
+      return new Response(res.body, {
+        headers: {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          'X-Accel-Buffering': 'no',
+        },
+      });
+    }
+
     const endpoints: Record<string, string> = {
-      poll:    '/feed/poll',
-      hn:      '/feed/backfill/hn',
-      reddit:  '/feed/backfill/reddit',
+      poll:   '/feed/poll',
+      hn:     '/feed/backfill/hn',
+      reddit: '/feed/backfill/reddit',
     };
 
     const path = endpoints[action];

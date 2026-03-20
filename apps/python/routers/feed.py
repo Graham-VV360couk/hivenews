@@ -6,6 +6,7 @@ POST /feed/backfill/reddit — backfill Reddit posts via public JSON API
 """
 
 import asyncio
+import json
 import logging
 from datetime import datetime, timezone, timedelta
 from uuid import UUID
@@ -13,6 +14,7 @@ from uuid import UUID
 import feedparser
 import httpx
 from fastapi import APIRouter
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from database import get_conn
@@ -213,6 +215,150 @@ async def poll_rss_sources() -> dict:
         "skipped_duplicates": skipped,
         "errors": errors,
     }
+
+
+# ---------------------------------------------------------------------------
+# RSS poll — streaming (SSE) with per-feed log events
+# ---------------------------------------------------------------------------
+
+@router.post("/poll-stream")
+async def poll_rss_stream() -> StreamingResponse:
+    """
+    Same as /feed/poll but streams Server-Sent Events so the dashboard can
+    display live per-feed progress logs.
+    """
+
+    async def _generate():
+        def evt(data: dict) -> str:
+            return f"data: {json.dumps(data)}\n\n"
+
+        async with get_conn() as conn:
+            sources = await conn.fetch(
+                "SELECT id, name, url, domain_tags "
+                "FROM sources "
+                "WHERE platform = 'rss' AND is_active = TRUE AND url IS NOT NULL "
+                "ORDER BY name"
+            )
+
+        yield evt({"type": "start", "total": len(sources),
+                   "msg": f"Found {len(sources)} active RSS source(s)"})
+
+        total_ingested = total_skipped = total_errors = 0
+
+        async with httpx.AsyncClient(timeout=20) as client:
+            for source in sources:
+                name = source["name"]
+                url  = source["url"]
+                domain_tags = list(source["domain_tags"] or [])
+
+                yield evt({"type": "feed_start", "name": name, "url": url,
+                           "msg": f"Connecting to {name}…"})
+
+                # Fetch the feed
+                try:
+                    resp = await client.get(url, follow_redirects=True)
+                    resp.raise_for_status()
+                except Exception as exc:
+                    err = str(exc)
+                    yield evt({"type": "feed_error", "name": name,
+                               "msg": f"  ✗ Failed to fetch: {err}"})
+                    total_errors += 1
+                    continue
+
+                try:
+                    feed = feedparser.parse(resp.text)
+                except Exception as exc:
+                    yield evt({"type": "feed_error", "name": name,
+                               "msg": f"  ✗ Failed to parse feed: {exc}"})
+                    total_errors += 1
+                    continue
+
+                entry_count = len(feed.entries)
+                feed_title  = feed.feed.get("title", name)
+                yield evt({"type": "feed_connected", "name": name,
+                           "feed_title": feed_title, "entry_count": entry_count,
+                           "msg": f"  ✓ Connected — \"{feed_title}\" — {entry_count} item(s) in feed"})
+
+                ingested = skipped = errors = 0
+
+                for entry in feed.entries:
+                    url_item = entry.get("link", "")
+                    if not url_item:
+                        errors += 1
+                        continue
+
+                    title   = entry.get("title", "")
+                    content = (
+                        entry.get("summary", "")
+                        or (entry.get("content") or [{}])[0].get("value", "")
+                    )
+
+                    published_at = None
+                    if pt := entry.get("published_parsed"):
+                        try:
+                            published_at = datetime(*pt[:6], tzinfo=timezone.utc)
+                        except Exception:
+                            pass
+
+                    result = await run_pipeline(
+                        source_id=source["id"],
+                        title=title,
+                        content=content,
+                        url=url_item,
+                        published_at=published_at,
+                        domain_tags=domain_tags,
+                        source_type="rss",
+                    )
+                    if result == "ingested":
+                        ingested += 1
+                    elif result == "duplicate":
+                        skipped += 1
+                    else:
+                        errors += 1
+
+                total_ingested += ingested
+                total_skipped  += skipped
+                total_errors   += errors
+
+                parts = [f"ingested {ingested}"]
+                if skipped:
+                    parts.append(f"{skipped} duplicate(s) skipped")
+                if errors:
+                    parts.append(f"{errors} error(s)")
+                yield evt({
+                    "type": "feed_done",
+                    "name": name,
+                    "ingested": ingested,
+                    "skipped": skipped,
+                    "errors": errors,
+                    "msg": f"  → {', '.join(parts)}",
+                })
+
+                # Update last_ingested timestamp
+                async with get_conn() as conn:
+                    await conn.execute(
+                        "UPDATE sources SET last_ingested = NOW() WHERE id = $1",
+                        source["id"]
+                    )
+
+        yield evt({
+            "type": "complete",
+            "total_ingested": total_ingested,
+            "total_skipped": total_skipped,
+            "total_errors": total_errors,
+            "sources": len(sources),
+            "msg": (
+                f"Done — {total_ingested} ingested, "
+                f"{total_skipped} duplicates skipped, "
+                f"{total_errors} error(s) across {len(sources)} feed(s)"
+            ),
+        })
+
+    return StreamingResponse(
+        _generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 # ---------------------------------------------------------------------------
