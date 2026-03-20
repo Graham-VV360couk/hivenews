@@ -1,5 +1,6 @@
 """Cluster readiness scoring. Determines when a cluster has enough signal
 for a content pack. See SCORING.md for full component breakdown."""
+import asyncio
 import logging
 from uuid import UUID
 
@@ -87,4 +88,24 @@ async def recalculate_cluster_readiness(cluster_id: UUID) -> float:
             novelty_score,
             cluster_id,
         )
+
+        # Trigger content pack if readiness threshold met or hard cap reached
+        days_since = stats["days_since_last_pack"]
+        if should_trigger_content_pack(score, days_since):
+            # Fire-and-forget — do not block readiness recalculation
+            asyncio.create_task(_trigger_content_pack(cluster_id))
+
         return score
+
+
+async def _trigger_content_pack(cluster_id: UUID) -> None:
+    """Background task: trigger content pack creation without blocking."""
+    try:
+        from services.content_pack import trigger_pack_for_cluster
+        pack_id = await trigger_pack_for_cluster(cluster_id)
+        if pack_id:
+            log.info("Auto-triggered content pack %s for cluster %s", pack_id, cluster_id)
+        else:
+            log.warning("Auto-trigger: draft generation failed for cluster %s", cluster_id)
+    except Exception as exc:
+        log.warning("Auto-trigger: unexpected error for cluster %s: %s", cluster_id, exc)
