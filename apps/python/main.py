@@ -4,7 +4,7 @@ from fastapi import FastAPI
 
 from database import init_pool, close_pool
 from redis_client import init_redis, close_redis
-from routers import ingest, score
+from routers import ingest, score, honeypot
 
 
 @asynccontextmanager
@@ -20,6 +20,7 @@ app = FastAPI(title="NewsHive Python Service", lifespan=lifespan)
 
 app.include_router(ingest.router)
 app.include_router(score.router)
+app.include_router(honeypot.router)
 
 
 @app.get("/health")
