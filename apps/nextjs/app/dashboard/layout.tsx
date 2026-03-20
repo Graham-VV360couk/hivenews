@@ -46,28 +46,23 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             </li>
           ))}
         </ul>
-        <div style={{ position: 'absolute', bottom: '20px', padding: '0 20px' }}>
+      </nav>
+
+      {/* Main content */}
+      <main style={{ flex: 1, overflowY: 'auto' }}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '14px 32px', borderBottom: '1px solid #1a1a1a' }}>
           <form action="/api/auth/logout" method="POST">
             <button
               type="submit"
-              style={{
-                background: 'none',
-                border: 'none',
-                color: '#666',
-                fontSize: '13px',
-                cursor: 'pointer',
-                padding: 0,
-              }}
+              style={{ background: 'none', border: 'none', color: '#555', fontSize: '13px', cursor: 'pointer', padding: 0 }}
             >
               Sign out
             </button>
           </form>
         </div>
-      </nav>
-
-      {/* Main content */}
-      <main style={{ flex: 1, padding: '32px', overflowY: 'auto' }}>
-        {children}
+        <div style={{ padding: '32px' }}>
+          {children}
+        </div>
       </main>
     </div>
   );
