@@ -22,9 +22,11 @@ class Settings(BaseSettings):
     x_access_token: str = ""
     x_access_secret: str = ""
     linkedin_access_token: str = ""
-    linkedin_person_id: str = ""
+    linkedin_org_id: str = ""          # Company page numeric ID (preferred)
+    linkedin_person_id: str = ""       # Personal profile URN (fallback)
     facebook_page_access_token: str = ""
     facebook_page_id: str = ""
+    instagram_user_id: str = ""        # Instagram Business Account ID (same app as Facebook)
 
 
 settings = Settings()

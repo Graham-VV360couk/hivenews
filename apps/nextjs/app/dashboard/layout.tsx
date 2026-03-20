@@ -8,6 +8,7 @@ const NAV_ITEMS = [
   { href: '/dashboard/sources', label: 'Sources' },
   { href: '/dashboard/ingest', label: 'Ingest' },
   { href: '/dashboard/monthly', label: 'Monthly Report' },
+  { href: '/dashboard/connections', label: 'Connections' },
   { href: '/dashboard/submissions', label: 'Submissions' },
 ];
 
