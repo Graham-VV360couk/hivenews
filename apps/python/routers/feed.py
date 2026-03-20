@@ -8,6 +8,7 @@ POST /feed/backfill/reddit — backfill Reddit posts via public JSON API
 import asyncio
 import json
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone, timedelta
 from uuid import UUID
 
@@ -33,6 +34,15 @@ from services.scoring import ALERT_CANDIDATE_THRESHOLD, apply_scores_to_signal, 
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/feed", tags=["feed"])
+
+# Thread pool for running blocking feedparser calls without freezing the event loop
+_thread_pool = ThreadPoolExecutor(max_workers=4)
+
+
+async def _parse_feed(text: str):
+    """Run feedparser (blocking) in a thread pool to avoid blocking the event loop."""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(_thread_pool, feedparser.parse, text)
 
 # ---------------------------------------------------------------------------
 # Core pipeline — shared between poll and backfill routes
@@ -162,7 +172,7 @@ async def poll_rss_sources() -> dict:
         for source in sources:
             try:
                 resp = await client.get(source["url"], follow_redirects=True)
-                feed = feedparser.parse(resp.text)
+                feed = await _parse_feed(resp.text)
             except Exception as exc:
                 log.warning("Failed to fetch feed %s: %s", source["url"], exc)
                 errors += 1
@@ -266,7 +276,7 @@ async def poll_rss_stream() -> StreamingResponse:
                     continue
 
                 try:
-                    feed = feedparser.parse(resp.text)
+                    feed = await _parse_feed(resp.text)
                 except Exception as exc:
                     yield evt({"type": "feed_error", "name": name,
                                "msg": f"  ✗ Failed to parse feed: {exc}"})
@@ -680,12 +690,16 @@ async def poll_hn_live(req: HNLiveRequest) -> dict:
                 return None
 
         batch_size = 20
+        unresolved = 0
         for i in range(0, len(story_ids), batch_size):
             batch = story_ids[i: i + batch_size]
             items = await asyncio.gather(*[fetch_item(sid) for sid in batch])
 
             for item in items:
-                if not item or item.get("type") != "story":
+                if not item:
+                    unresolved += 1
+                    continue
+                if item.get("type") != "story":
                     continue
 
                 url   = item.get("url") or f"https://news.ycombinator.com/item?id={item.get('id')}"
@@ -712,6 +726,8 @@ async def poll_hn_live(req: HNLiveRequest) -> dict:
 
             await asyncio.sleep(0.1)  # gentle pacing between batches
 
+        errors += unresolved  # unresolved item fetches count as errors
+
     return {
         "source": f"hackernews/{req.feed}",
         "feed": req.feed,
@@ -719,4 +735,109 @@ async def poll_hn_live(req: HNLiveRequest) -> dict:
         "ingested": ingested,
         "skipped_duplicates": skipped,
         "errors": errors,
+        "fetch_errors": unresolved,
     }
+
+
+# ---------------------------------------------------------------------------
+# Health check — lets the dashboard confirm the Python service is reachable
+# and that key dependencies (DB, Redis, OpenAI) are responsive
+# ---------------------------------------------------------------------------
+
+@router.get("/health")
+async def feed_health() -> dict:
+    """Quick connectivity check for the ingest dashboard."""
+    checks: dict[str, str] = {}
+
+    # Database
+    try:
+        async with get_conn() as conn:
+            count = await conn.fetchval("SELECT COUNT(*) FROM sources")
+        checks["database"] = f"ok ({count} sources)"
+    except Exception as exc:
+        checks["database"] = f"error: {exc}"
+
+    # Redis (via dedup service which uses it)
+    try:
+        from redis_client import get_redis
+        r = await get_redis()
+        await r.ping()
+        checks["redis"] = "ok"
+    except Exception as exc:
+        checks["redis"] = f"error: {exc}"
+
+    # OpenAI embedding (single test call)
+    try:
+        from services.embedding import generate_embedding
+        await generate_embedding("health check")
+        checks["openai_embedding"] = "ok"
+    except Exception as exc:
+        checks["openai_embedding"] = f"error: {exc}"
+
+    all_ok = all(v.startswith("ok") for v in checks.values())
+    return {"status": "ok" if all_ok else "degraded", "checks": checks}
+
+
+# ---------------------------------------------------------------------------
+# Seed default RSS sources from the INGESTION.md spec
+# Idempotent — skips sources that already exist (matched by URL)
+# ---------------------------------------------------------------------------
+
+_DEFAULT_SOURCES = [
+    # AI
+    {"name": "ArXiv CS.AI", "url": "https://rss.arxiv.org/rss/cs.AI", "platform": "rss", "domain_tags": ["ai"], "tier": 1},
+    {"name": "OpenAI Blog", "url": "https://openai.com/blog/rss/", "platform": "rss", "domain_tags": ["ai"], "tier": 1},
+    {"name": "Anthropic News", "url": "https://www.anthropic.com/news/rss", "platform": "rss", "domain_tags": ["ai"], "tier": 1},
+    {"name": "Google DeepMind Blog", "url": "https://deepmind.google/blog/rss.xml", "platform": "rss", "domain_tags": ["ai"], "tier": 1},
+    {"name": "Hugging Face Blog", "url": "https://huggingface.co/blog/feed.xml", "platform": "rss", "domain_tags": ["ai"], "tier": 2},
+    {"name": "MIT News — AI", "url": "https://news.mit.edu/rss/topic/artificial-intelligence2", "platform": "rss", "domain_tags": ["ai"], "tier": 1},
+    {"name": "VentureBeat AI", "url": "https://venturebeat.com/category/ai/feed/", "platform": "rss", "domain_tags": ["ai"], "tier": 2},
+    {"name": "TechCrunch AI", "url": "https://techcrunch.com/category/artificial-intelligence/feed/", "platform": "rss", "domain_tags": ["ai"], "tier": 2},
+    {"name": "Wired AI", "url": "https://www.wired.com/feed/tag/artificial-intelligence/latest/rss", "platform": "rss", "domain_tags": ["ai"], "tier": 2},
+    # VR / AR
+    {"name": "Road to VR", "url": "https://www.roadtovr.com/feed/", "platform": "rss", "domain_tags": ["vr"], "tier": 1},
+    {"name": "Upload VR", "url": "https://uploadvr.com/feed/", "platform": "rss", "domain_tags": ["vr"], "tier": 1},
+    {"name": "VR Scout", "url": "https://vrscout.com/feed/", "platform": "rss", "domain_tags": ["vr"], "tier": 2},
+    {"name": "XR Today", "url": "https://www.xrtoday.com/feed/", "platform": "rss", "domain_tags": ["vr"], "tier": 2},
+    # SEO
+    {"name": "Search Engine Land", "url": "https://searchengineland.com/feed", "platform": "rss", "domain_tags": ["seo"], "tier": 1},
+    {"name": "Search Engine Journal", "url": "https://www.searchenginejournal.com/feed/", "platform": "rss", "domain_tags": ["seo"], "tier": 1},
+    {"name": "Moz Blog", "url": "https://moz.com/blog/feed", "platform": "rss", "domain_tags": ["seo"], "tier": 2},
+    {"name": "Ahrefs Blog", "url": "https://ahrefs.com/blog/feed/", "platform": "rss", "domain_tags": ["seo"], "tier": 2},
+    {"name": "Google Search Central Blog", "url": "https://developers.google.com/search/blog/feeds/blog_posts.xml", "platform": "rss", "domain_tags": ["seo"], "tier": 1},
+    # Vibe Coding
+    {"name": "Dev.to", "url": "https://dev.to/feed", "platform": "rss", "domain_tags": ["vibe_coding"], "tier": 2},
+    {"name": "Hacker News Best (RSS)", "url": "https://news.ycombinator.com/rss", "platform": "rss", "domain_tags": ["ai", "vibe_coding"], "tier": 1},
+    {"name": "The Pragmatic Engineer", "url": "https://newsletter.pragmaticengineer.com/feed", "platform": "rss", "domain_tags": ["vibe_coding"], "tier": 2},
+    # Cross-domain
+    {"name": "MIT Technology Review", "url": "https://www.technologyreview.com/feed/", "platform": "rss", "domain_tags": ["cross"], "tier": 1},
+    {"name": "The Verge Tech", "url": "https://www.theverge.com/rss/index.xml", "platform": "rss", "domain_tags": ["cross"], "tier": 2},
+    {"name": "Ars Technica", "url": "https://feeds.arstechnica.com/arstechnica/index", "platform": "rss", "domain_tags": ["cross"], "tier": 2},
+]
+
+
+@router.post("/seed-sources")
+async def seed_default_sources() -> dict:
+    """
+    Insert the default RSS sources from the INGESTION.md spec.
+    Skips any source whose URL already exists in the database (idempotent).
+    """
+    added = skipped = 0
+    async with get_conn() as conn:
+        for s in _DEFAULT_SOURCES:
+            existing = await conn.fetchval(
+                "SELECT id FROM sources WHERE url = $1", s["url"]
+            )
+            if existing:
+                skipped += 1
+                continue
+            await conn.execute(
+                """
+                INSERT INTO sources (name, url, platform, domain_tags, tier)
+                VALUES ($1, $2, $3, $4, $5)
+                """,
+                s["name"], s["url"], s["platform"], s["domain_tags"], s["tier"],
+            )
+            added += 1
+
+    return {"added": added, "already_existed": skipped, "total": len(_DEFAULT_SOURCES)}

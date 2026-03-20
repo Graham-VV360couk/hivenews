@@ -1,7 +1,7 @@
 'use client';
 // apps/nextjs/app/dashboard/ingest/page.tsx
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 
 const DOMAINS = ['ai', 'vr', 'seo', 'vibe_coding', 'cross'];
 
@@ -29,10 +29,21 @@ interface Result {
   skipped_duplicates?: number;
   errors?: number;
   sources_polled?: number;
+  requested?: number;
+  fetch_errors?: number;
   source?: string;
   query?: string;
   days_back?: number;
   error?: string;
+}
+
+interface HealthStatus {
+  status: 'ok' | 'degraded';
+  checks: {
+    database: string;   // e.g. "ok (5 sources)" or "error: ..."
+    redis: string;
+    openai_embedding: string;
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -166,6 +177,146 @@ function LogConsole({ logs, running }: { logs: LogEvent[]; running: boolean }) {
 }
 
 // ---------------------------------------------------------------------------
+// Health panel
+// ---------------------------------------------------------------------------
+
+function HealthPanel() {
+  const [health, setHealth] = useState<HealthStatus | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [seedRunning, setSeedRunning] = useState(false);
+  const [seedResult, setSeedResult] = useState<{ inserted?: number; skipped?: number; error?: string } | null>(null);
+
+  const checkHealth = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch('/dashboard/api/ingest');
+      setHealth(await res.json());
+    } catch {
+      setHealth(null);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { checkHealth(); }, [checkHealth]);
+
+  async function handleSeed() {
+    setSeedRunning(true);
+    setSeedResult(null);
+    const res = await fetch('/dashboard/api/ingest', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'seed' }),
+    });
+    setSeedResult(await res.json());
+    setSeedRunning(false);
+    checkHealth(); // refresh source count
+  }
+
+  const dot = (val: string) => {
+    const ok = val.startsWith('ok');
+    return (
+      <span style={{
+        display: 'inline-block', width: '7px', height: '7px',
+        borderRadius: '50%', background: ok ? '#22c55e' : '#ef4444',
+        marginRight: '6px', flexShrink: 0,
+      }} />
+    );
+  };
+
+  // Extract source count from "ok (N sources)" string
+  const dbCheck = health?.checks?.database ?? '';
+  const sourceCountMatch = dbCheck.match(/\((\d+) sources?\)/);
+  const sourceCount = sourceCountMatch ? parseInt(sourceCountMatch[1]) : 0;
+
+  return (
+    <div style={{
+      marginBottom: '24px', padding: '16px 20px',
+      background: '#111', border: '1px solid #1e1e1e', borderRadius: '6px',
+      display: 'flex', alignItems: 'center', gap: '24px', flexWrap: 'wrap',
+    }}>
+      <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap', flex: 1 }}>
+        {loading ? (
+          <span style={{ fontSize: '12px', color: '#444' }}>Checking services…</span>
+        ) : health ? (
+          <>
+            <div style={{ display: 'flex', alignItems: 'center', fontSize: '12px' }}>
+              {dot(health.checks.database)}
+              <span style={{ color: '#555' }}>
+                Database · {sourceCount} source{sourceCount !== 1 ? 's' : ''}
+                {!health.checks.database.startsWith('ok') && (
+                  <span style={{ color: '#ef4444' }}> ({health.checks.database})</span>
+                )}
+              </span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', fontSize: '12px' }}>
+              {dot(health.checks.redis)}
+              <span style={{ color: '#555' }}>
+                Redis{!health.checks.redis.startsWith('ok') && (
+                  <span style={{ color: '#ef4444' }}> ({health.checks.redis})</span>
+                )}
+              </span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', fontSize: '12px' }}>
+              {dot(health.checks.openai_embedding)}
+              <span style={{ color: '#555' }}>
+                OpenAI Embeddings{!health.checks.openai_embedding.startsWith('ok') && (
+                  <span style={{ color: '#ef4444' }}> ({health.checks.openai_embedding})</span>
+                )}
+              </span>
+            </div>
+          </>
+        ) : (
+          <span style={{ fontSize: '12px', color: '#ef4444' }}>Python service unreachable</span>
+        )}
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
+        {sourceCount === 0 && !loading && health && (
+          <span style={{ fontSize: '11px', color: '#F5A623' }}>No sources — seed defaults to start</span>
+        )}
+        <button
+          onClick={handleSeed}
+          disabled={seedRunning}
+          style={{
+            padding: '6px 14px', fontSize: '12px', borderRadius: '3px',
+            background: 'none', border: '1px solid #333',
+            color: seedRunning ? '#444' : '#888',
+            cursor: seedRunning ? 'not-allowed' : 'pointer',
+          }}
+        >
+          {seedRunning ? 'Seeding…' : 'Seed Default Sources'}
+        </button>
+        <button
+          onClick={checkHealth}
+          disabled={loading}
+          style={{
+            padding: '6px 10px', fontSize: '11px', borderRadius: '3px',
+            background: 'none', border: '1px solid #222',
+            color: '#444', cursor: 'pointer',
+          }}
+        >
+          ↻
+        </button>
+      </div>
+
+      {seedResult && (
+        <div style={{ width: '100%', fontSize: '12px', marginTop: '4px' }}>
+          {seedResult.error ? (
+            <span style={{ color: '#ef4444' }}>Error: {seedResult.error}</span>
+          ) : (
+            <span style={{ color: '#22c55e' }}>
+              Seeded {seedResult.inserted} source{seedResult.inserted !== 1 ? 's' : ''}
+              {(seedResult.skipped ?? 0) > 0 && ` · ${seedResult.skipped} already existed`}
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // RSS poll section — uses streaming SSE
 // ---------------------------------------------------------------------------
 
@@ -185,6 +336,15 @@ function RssPollSection() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'poll-stream' }),
       });
+
+      const contentType = res.headers.get('content-type') ?? '';
+      if (!res.ok || !contentType.includes('text/event-stream')) {
+        const text = await res.text();
+        let msg = `HTTP ${res.status}`;
+        try { msg = JSON.parse(text)?.error ?? msg; } catch { /* */ }
+        setLogs([{ type: 'feed_error', msg: `Failed to start poll: ${msg}` }]);
+        return;
+      }
 
       if (!res.body) throw new Error('No stream');
 
@@ -357,6 +517,7 @@ export default function IngestPage() {
         </p>
       </div>
 
+      <HealthPanel />
       <RssPollSection />
 
       {/* HN Live — official Firebase API */}
@@ -400,7 +561,25 @@ export default function IngestPage() {
               Fetching story list then resolving items in parallel batches…
             </p>
           )}
-          {hnLiveResult && <ResultBadge result={hnLiveResult} />}
+          {hnLiveResult && (
+            hnLiveResult.error ? (
+              <div style={{ color: '#ef4444', fontSize: '13px', marginTop: '10px' }}>Error: {hnLiveResult.error}</div>
+            ) : (
+              <div style={{
+                marginTop: '12px', padding: '14px 16px',
+                background: '#0f1a0f', border: '1px solid #1a3a1a', borderRadius: '4px',
+                display: 'flex', gap: '24px', flexWrap: 'wrap',
+              }}>
+                {hnLiveResult.requested !== undefined && <Stat label="Requested" value={hnLiveResult.requested} color="#F5A623" />}
+                {hnLiveResult.ingested !== undefined && <Stat label="Ingested" value={hnLiveResult.ingested} color="#22c55e" />}
+                {hnLiveResult.skipped_duplicates !== undefined && <Stat label="Duplicates skipped" value={hnLiveResult.skipped_duplicates} color="#555" />}
+                {(hnLiveResult.errors !== undefined || hnLiveResult.fetch_errors !== undefined) && (
+                  <Stat label="Errors" value={(hnLiveResult.errors ?? 0) + (hnLiveResult.fetch_errors ?? 0)}
+                    color={((hnLiveResult.errors ?? 0) + (hnLiveResult.fetch_errors ?? 0)) > 0 ? '#ef4444' : '#555'} />
+                )}
+              </div>
+            )
+          )}
         </form>
       </Section>
 

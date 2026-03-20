@@ -4,6 +4,17 @@ import { NextRequest, NextResponse } from 'next/server';
 
 const PYTHON_URL = process.env.PYTHON_SERVICE_URL || 'http://localhost:8000';
 
+export async function GET() {
+  try {
+    const res = await fetch(`${PYTHON_URL}/feed/health`);
+    const data = await res.json();
+    if (!res.ok) return NextResponse.json(data, { status: res.status });
+    return NextResponse.json(data);
+  } catch {
+    return NextResponse.json({ error: 'Python service unreachable' }, { status: 500 });
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -16,7 +27,22 @@ export async function POST(req: NextRequest) {
         headers: { 'Content-Type': 'application/json' },
       });
       if (!res.ok || !res.body) {
-        return NextResponse.json({ error: 'Stream failed' }, { status: 500 });
+        // Return the error as an SSE event so the client can display it
+        const errorBody = res.body ? await res.text() : 'Stream failed';
+        const errMsg = JSON.stringify({ type: 'feed_error', msg: `Server error ${res.status}: ${errorBody}` });
+        const stream = new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode(`data: ${errMsg}\n\n`));
+            controller.close();
+          },
+        });
+        return new Response(stream, {
+          headers: {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            'X-Accel-Buffering': 'no',
+          },
+        });
       }
       return new Response(res.body, {
         headers: {
@@ -25,6 +51,14 @@ export async function POST(req: NextRequest) {
           'X-Accel-Buffering': 'no',
         },
       });
+    }
+
+    // Seed default sources
+    if (action === 'seed') {
+      const res = await fetch(`${PYTHON_URL}/feed/seed-sources`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) return NextResponse.json(data, { status: res.status });
+      return NextResponse.json(data);
     }
 
     const endpoints: Record<string, string> = {
