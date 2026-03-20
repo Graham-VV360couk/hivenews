@@ -1,4 +1,3 @@
-export const dynamic = 'force-dynamic';
 // apps/nextjs/app/dashboard/trajectories/page.tsx
 'use client';
 
