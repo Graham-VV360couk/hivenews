@@ -74,12 +74,17 @@ async def score_signal(
     )
     try:
         response = await _get_client().messages.create(
-            model="claude-opus-4-6",
-            max_tokens=256,
+            model="claude-haiku-4-5-20251001",
+            max_tokens=512,
             messages=[{"role": "user", "content": prompt}],
         )
         raw = response.content[0].text.strip()
-        data = json.loads(raw)
+        # Strip markdown code fences if present
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        data = json.loads(raw.strip())
         return {
             "magnitude": float(data["magnitude"]),
             "irreversibility": float(data["irreversibility"]),
