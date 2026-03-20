@@ -19,6 +19,7 @@ from database import get_conn
 from services.social.x import post_tweet, post_thread
 from services.social.linkedin import post_to_linkedin
 from services.social.meta import post_to_facebook
+from services.webhook import fire_webhooks
 
 log = logging.getLogger(__name__)
 
@@ -111,6 +112,27 @@ async def publish_pack(pack_id: UUID) -> dict:
 
     log.info("Pack %s published: %d platforms, %d skipped, %d errors",
              pack_id, published, skipped, len(errors))
+
+    # Fire webhook notifications — never blocks publish
+    try:
+        async with get_conn() as conn:
+            pack_row = await conn.fetchrow(
+                """
+                SELECT cp.pack_type, cl.domain_tags
+                FROM content_packs cp
+                LEFT JOIN clusters cl ON cl.id = cp.cluster_id
+                WHERE cp.id = $1
+                """,
+                pack_id,
+            )
+        if pack_row:
+            await fire_webhooks(
+                pack_id,
+                pack_row["pack_type"],
+                list(pack_row["domain_tags"] or []),
+            )
+    except Exception as exc:
+        log.warning("Webhook fire failed for pack %s: %s", pack_id, exc)
 
     return {
         "pack_id": str(pack_id),
