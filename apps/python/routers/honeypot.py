@@ -6,14 +6,17 @@ POST /honeypot/outcome — editorial team records outcome (confirmed/wrong/parti
 import logging
 from uuid import UUID
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from pydantic import BaseModel
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from database import get_conn
 from services.honeypot import process_submission
 
 log = logging.getLogger(__name__)
 router = APIRouter()
+limiter = Limiter(key_func=get_remote_address)
 
 
 # ---------------------------------------------------------------------------
@@ -35,7 +38,8 @@ class HoneypotSubmitResponse(BaseModel):
 
 
 @router.post("/honeypot/submit", response_model=HoneypotSubmitResponse)
-async def submit_honeypot(req: HoneypotSubmitRequest) -> HoneypotSubmitResponse:
+@limiter.limit("5/minute")
+async def submit_honeypot(request: Request, req: HoneypotSubmitRequest) -> HoneypotSubmitResponse:
     result = await process_submission(
         content=req.content,
         questionnaire_answers=req.questionnaire_answers,
