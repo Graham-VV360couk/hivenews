@@ -187,6 +187,8 @@ function HealthPanel() {
   const [seedResult, setSeedResult] = useState<{ inserted?: number; skipped?: number; error?: string } | null>(null);
   const [namingRunning, setNamingRunning] = useState(false);
   const [namingResult, setNamingResult] = useState<{ named?: number; total_processed?: number; message?: string; error?: string } | null>(null);
+  const [synthesiseRunning, setSynthesiseRunning] = useState(false);
+  const [synthesiseResult, setSynthesiseResult] = useState<{ synthesised?: number; total_processed?: number; error?: string } | null>(null);
 
   const checkHealth = useCallback(async () => {
     setLoading(true);
@@ -226,6 +228,18 @@ function HealthPanel() {
     });
     setNamingResult(await res.json());
     setNamingRunning(false);
+  }
+
+  async function handleSynthesiseNarratives() {
+    setSynthesiseRunning(true);
+    setSynthesiseResult(null);
+    const res = await fetch('/dashboard/api/ingest', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'synthesise-narratives' }),
+    });
+    setSynthesiseResult(await res.json());
+    setSynthesiseRunning(false);
   }
 
   const dot = (val: string) => {
@@ -315,6 +329,18 @@ function HealthPanel() {
           {namingRunning ? 'Naming…' : 'Name Clusters'}
         </button>
         <button
+          onClick={handleSynthesiseNarratives}
+          disabled={synthesiseRunning}
+          style={{
+            padding: '6px 14px', fontSize: '12px', borderRadius: '3px',
+            background: 'none', border: '1px solid #333',
+            color: synthesiseRunning ? '#444' : '#888',
+            cursor: synthesiseRunning ? 'not-allowed' : 'pointer',
+          }}
+        >
+          {synthesiseRunning ? 'Synthesising…' : 'Synthesise Stories'}
+        </button>
+        <button
           onClick={checkHealth}
           disabled={loading}
           style={{
@@ -337,6 +363,19 @@ function HealthPanel() {
             <span style={{ color: '#22c55e' }}>
               Named {namingResult.named} cluster{namingResult.named !== 1 ? 's' : ''}
               {(namingResult.total_processed ?? 0) > 0 && ` (processed ${namingResult.total_processed})`}
+            </span>
+          )}
+        </div>
+      )}
+
+      {synthesiseResult && (
+        <div style={{ width: '100%', fontSize: '12px', marginTop: '4px' }}>
+          {synthesiseResult.error ? (
+            <span style={{ color: '#ef4444' }}>Error: {synthesiseResult.error}</span>
+          ) : (
+            <span style={{ color: '#22c55e' }}>
+              Synthesised {synthesiseResult.synthesised} stor{synthesiseResult.synthesised !== 1 ? 'ies' : 'y'}
+              {(synthesiseResult.total_processed ?? 0) > 0 && ` (processed ${synthesiseResult.total_processed})`}
             </span>
           )}
         </div>

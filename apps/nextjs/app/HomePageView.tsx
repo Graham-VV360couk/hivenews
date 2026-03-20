@@ -175,7 +175,9 @@ function StoryCard({ story, delay }: { story: Story; delay: number }) {
                 {story.name}
               </a>
             ) : (
-              <span style={{ color: hovered ? '#f0f1f8' : '#d8dae8', transition: 'color 0.2s ease' }}>{story.name}</span>
+              <Link href={`/stories/${story.id}`} style={{ color: hovered ? '#f0f1f8' : '#d8dae8', textDecoration: 'none', transition: 'color 0.2s ease' }}>
+                {story.name}
+              </Link>
             )}
           </h3>
 

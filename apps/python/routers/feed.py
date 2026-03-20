@@ -28,6 +28,7 @@ from services.alert_detection import (
 from services.clustering import assign_cluster
 from services.dedup import is_duplicate, mark_seen
 from services.embedding import generate_embedding
+from services.narrative import synthesise_narrative
 from services.readiness import recalculate_cluster_readiness
 from services.reality_check import run_reality_check
 from services.scoring import ALERT_CANDIDATE_THRESHOLD, apply_scores_to_signal, score_signal
@@ -813,10 +814,35 @@ async def name_clusters() -> dict:
                         row["id"]
                     )
                 named += 1
+                # Also synthesise narrative for newly named clusters
+                asyncio.create_task(synthesise_narrative(str(row["id"])))
         except Exception as exc:
             log.warning("Failed to name cluster %s: %s", row["id"], exc)
 
     return {"named": named, "total_processed": len(clusters)}
+
+
+@router.post("/synthesise-narratives")
+async def synthesise_all_narratives() -> dict:
+    """Synthesise narratives for all named clusters that don't have one yet."""
+    async with get_conn() as conn:
+        clusters = await conn.fetch(
+            """
+            SELECT id FROM clusters
+            WHERE is_active = TRUE
+              AND name IS NOT NULL
+              AND (narrative IS NULL OR narrative_updated_at < NOW() - INTERVAL '24 hours')
+            LIMIT 20
+            """
+        )
+
+    synthesised = 0
+    for row in clusters:
+        result = await synthesise_narrative(str(row["id"]))
+        if result:
+            synthesised += 1
+
+    return {"synthesised": synthesised, "total_processed": len(clusters)}
 
 
 # ---------------------------------------------------------------------------
