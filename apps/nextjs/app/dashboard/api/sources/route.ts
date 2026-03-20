@@ -17,11 +17,13 @@ export async function GET() {
         s.tier,
         s.is_active,
         s.last_ingested,
-        sr.total_signals,
+        COUNT(sig.id)::int          AS total_signals,
         sr.accuracy_rate,
         sr.lead_time_avg_days
       FROM sources s
+      LEFT JOIN signals sig ON sig.source_id = s.id
       LEFT JOIN source_reputation sr ON sr.source_id = s.id
+      GROUP BY s.id, sr.accuracy_rate, sr.lead_time_avg_days
       ORDER BY s.tier ASC, s.name
       LIMIT 200
     `;
