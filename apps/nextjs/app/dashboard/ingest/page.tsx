@@ -263,6 +263,13 @@ function RssPollSection() {
 // ---------------------------------------------------------------------------
 
 export default function IngestPage() {
+  // HN live (official Firebase API)
+  const [hnLiveFeed, setHnLiveFeed] = useState('top');
+  const [hnLiveMax, setHnLiveMax] = useState('200');
+  const [hnLiveDomains, setHnLiveDomains] = useState<string[]>(['ai']);
+  const [hnLiveRunning, setHnLiveRunning] = useState(false);
+  const [hnLiveResult, setHnLiveResult] = useState<Result | null>(null);
+
   // HN backfill
   const [hnQuery, setHnQuery] = useState('');
   const [hnDays, setHnDays] = useState('365');
@@ -279,6 +286,24 @@ export default function IngestPage() {
   const [redditDomains, setRedditDomains] = useState<string[]>([]);
   const [redditRunning, setRedditRunning] = useState(false);
   const [redditResult, setRedditResult] = useState<Result | null>(null);
+
+  async function handleHNLive(e: React.FormEvent) {
+    e.preventDefault();
+    setHnLiveRunning(true);
+    setHnLiveResult(null);
+    const res = await fetch('/dashboard/api/ingest', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'hn-live',
+        feed: hnLiveFeed,
+        max_items: parseInt(hnLiveMax) || 200,
+        domain_tags: hnLiveDomains,
+      }),
+    });
+    setHnLiveResult(await res.json());
+    setHnLiveRunning(false);
+  }
 
   async function handleHN(e: React.FormEvent) {
     e.preventDefault();
@@ -327,8 +352,53 @@ export default function IngestPage() {
 
       <RssPollSection />
 
+      {/* HN Live — official Firebase API */}
+      <Section title="Hacker News — Live Poll (Official API)">
+        <p style={{ margin: '0 0 14px', fontSize: '13px', color: '#555' }}>
+          Uses the official Firebase REST API at <code style={{ color: '#888', fontSize: '12px' }}>hacker-news.firebaseio.com</code> — fully public, no login required.
+          Fetches current top/new/best story IDs then resolves each item. Use this for regular live polling.
+        </p>
+        <form onSubmit={handleHNLive}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '12px' }}>
+            <div>
+              <label style={labelStyle}>Feed</label>
+              <select value={hnLiveFeed} onChange={e => setHnLiveFeed(e.target.value)} style={inputStyle}>
+                <option value="top">Top Stories (front page)</option>
+                <option value="new">New Stories (latest)</option>
+                <option value="best">Best Stories (high quality)</option>
+              </select>
+            </div>
+            <div>
+              <label style={labelStyle}>Max items (up to 500)</label>
+              <input type="number" min="1" max="500" value={hnLiveMax}
+                onChange={e => setHnLiveMax(e.target.value)} style={inputStyle} />
+            </div>
+          </div>
+          <div style={{ marginBottom: '14px' }}>
+            <label style={labelStyle}>Assign domains</label>
+            <DomainPicker value={hnLiveDomains} onChange={setHnLiveDomains} />
+          </div>
+          <button type="submit" disabled={hnLiveRunning} style={{
+            padding: '9px 18px',
+            background: hnLiveRunning ? '#1a1a1a' : '#1a1a1a',
+            border: `1px solid ${hnLiveRunning ? '#222' : '#333'}`,
+            color: hnLiveRunning ? '#444' : '#ccc',
+            borderRadius: '4px', fontSize: '13px',
+            cursor: hnLiveRunning ? 'not-allowed' : 'pointer',
+          }}>
+            {hnLiveRunning ? 'Fetching from HN…' : 'Poll HN Now'}
+          </button>
+          {hnLiveRunning && (
+            <p style={{ marginTop: '10px', fontSize: '12px', color: '#555' }}>
+              Fetching story list then resolving items in parallel batches…
+            </p>
+          )}
+          {hnLiveResult && <ResultBadge result={hnLiveResult} />}
+        </form>
+      </Section>
+
       {/* HN Backfill */}
-      <Section title="Hacker News — Historical Backfill">
+      <Section title="Hacker News — Historical Backfill (Algolia)">
         <p style={{ margin: '0 0 14px', fontSize: '13px', color: '#555' }}>
           Uses the Algolia HN Search API — free, no auth required. Supports full history going back years.
           Leave query blank to pull all top stories; add keywords to focus on a topic.

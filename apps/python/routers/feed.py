@@ -557,3 +557,99 @@ async def backfill_reddit(req: RedditBackfillRequest) -> dict:
         "skipped_duplicates": skipped,
         "errors": errors,
     }
+
+
+# ---------------------------------------------------------------------------
+# HN live poll — official Firebase API (no auth required, fully public)
+# Fetches top/new/best story IDs then resolves each item individually.
+# This is the canonical source; use Algolia backfill for historical depth.
+# ---------------------------------------------------------------------------
+
+HN_BASE = "https://hacker-news.firebaseio.com/v0"
+
+class HNLiveRequest(BaseModel):
+    feed: str = "top"          # top | new | best
+    max_items: int = 200
+    domain_tags: list[str] = []
+
+
+@router.post("/hn-live")
+async def poll_hn_live(req: HNLiveRequest) -> dict:
+    """
+    Poll Hacker News using the official Firebase REST API.
+    Fetches story IDs from /topstories, /newstories, or /beststories,
+    then resolves each item. No authentication required.
+    """
+    feed_map = {"top": "topstories", "new": "newstories", "best": "beststories"}
+    feed_path = feed_map.get(req.feed, "topstories")
+
+    async with get_conn() as conn:
+        row = await conn.fetchrow(
+            "SELECT id FROM sources WHERE platform = 'hackernews' AND is_active = TRUE LIMIT 1"
+        )
+    hn_source_id = row["id"] if row else None
+
+    ingested = skipped = errors = 0
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        # Step 1 — fetch the list of story IDs
+        try:
+            id_resp = await client.get(f"{HN_BASE}/{feed_path}.json")
+            id_resp.raise_for_status()
+            story_ids: list[int] = id_resp.json()
+        except Exception as exc:
+            log.error("Failed to fetch HN %s: %s", feed_path, exc)
+            return {"error": str(exc)}
+
+        story_ids = story_ids[: req.max_items]
+
+        # Step 2 — fetch each item concurrently in batches of 20
+        async def fetch_item(item_id: int) -> dict | None:
+            try:
+                r = await client.get(f"{HN_BASE}/item/{item_id}.json")
+                r.raise_for_status()
+                return r.json()
+            except Exception:
+                return None
+
+        batch_size = 20
+        for i in range(0, len(story_ids), batch_size):
+            batch = story_ids[i: i + batch_size]
+            items = await asyncio.gather(*[fetch_item(sid) for sid in batch])
+
+            for item in items:
+                if not item or item.get("type") != "story":
+                    continue
+
+                url   = item.get("url") or f"https://news.ycombinator.com/item?id={item.get('id')}"
+                title = item.get("title", "")
+                text  = item.get("text", "") or ""
+                ts    = item.get("time")
+                published_at = datetime.fromtimestamp(ts, tz=timezone.utc) if ts else None
+
+                result = await run_pipeline(
+                    source_id=hn_source_id,
+                    title=title,
+                    content=text,
+                    url=url,
+                    published_at=published_at,
+                    domain_tags=req.domain_tags,
+                    source_type="hackernews",
+                )
+                if result == "ingested":
+                    ingested += 1
+                elif result == "duplicate":
+                    skipped += 1
+                else:
+                    errors += 1
+
+            await asyncio.sleep(0.1)  # gentle pacing between batches
+
+    return {
+        "source": f"hackernews/{req.feed}",
+        "feed": req.feed,
+        "requested": len(story_ids),
+        "ingested": ingested,
+        "skipped_duplicates": skipped,
+        "errors": errors,
+    }

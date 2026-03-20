@@ -28,9 +28,10 @@ export async function POST(req: NextRequest) {
     }
 
     const endpoints: Record<string, string> = {
-      poll:   '/feed/poll',
-      hn:     '/feed/backfill/hn',
-      reddit: '/feed/backfill/reddit',
+      poll:      '/feed/poll',
+      'hn-live': '/feed/hn-live',
+      hn:        '/feed/backfill/hn',
+      reddit:    '/feed/backfill/reddit',
     };
 
     const path = endpoints[action];
