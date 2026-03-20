@@ -1,5 +1,6 @@
 // apps/nextjs/app/dashboard/layout.tsx
 import Link from 'next/link';
+import Image from 'next/image';
 
 const NAV_ITEMS = [
   { href: '/dashboard', label: 'Overview' },
@@ -23,8 +24,15 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         padding: '24px 0',
         flexShrink: 0,
       }}>
-        <div style={{ padding: '0 20px 24px', borderBottom: '1px solid #2a2a2a' }}>
-          <span style={{ color: '#F5A623', fontWeight: 700, fontSize: '16px' }}>HiveDeck</span>
+        <div style={{ padding: '16px 20px 20px', borderBottom: '1px solid #2a2a2a' }}>
+          <Image
+            src="/NewsHive_Logo.png"
+            alt="NewsHive"
+            width={130}
+            height={36}
+            style={{ objectFit: 'contain', height: '36px', width: 'auto', display: 'block' }}
+            priority
+          />
         </div>
         <ul style={{ listStyle: 'none', margin: '16px 0 0', padding: 0 }}>
           {NAV_ITEMS.map(item => (
