@@ -2,8 +2,8 @@ import type { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'HiveDeck',
-  description: 'NewsHive editorial dashboard',
+  title: 'NewsHive',
+  description: 'Intelligence tracking across emerging technology',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
