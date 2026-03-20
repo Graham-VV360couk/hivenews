@@ -107,8 +107,8 @@ export default async function DashboardHome() {
                   <td style={{ padding: '10px 16px', color: '#888' }}>
                     {(cluster.domain_tags || []).join(', ')}
                   </td>
-                  <td style={{ padding: '10px 16px', textAlign: 'right', color: cluster.readiness_score >= 75 ? '#F5A623' : '#666' }}>
-                    {cluster.readiness_score?.toFixed(1) ?? '—'}
+                  <td style={{ padding: '10px 16px', textAlign: 'right', color: Number(cluster.readiness_score) >= 75 ? '#F5A623' : '#666' }}>
+                    {cluster.readiness_score != null ? Number(cluster.readiness_score).toFixed(1) : '—'}
                   </td>
                 </tr>
               ))}

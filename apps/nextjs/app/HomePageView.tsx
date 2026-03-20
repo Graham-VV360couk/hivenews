@@ -2,7 +2,6 @@
 // apps/nextjs/app/HomePageView.tsx
 
 import { useEffect, useRef, useState } from 'react';
-import Image from 'next/image';
 import Link from 'next/link';
 
 export interface Story {
@@ -434,14 +433,8 @@ export function HomePageView({ stories }: { stories: Story[] }) {
           justifyContent: 'space-between',
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-            <Image
-              src="/NewsHive_Logo.png"
-              alt="NewsHive"
-              width={140}
-              height={40}
-              style={{ objectFit: 'contain', height: '40px', width: 'auto' }}
-              priority
-            />
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/NewsHive_Logo.png" alt="NewsHive" style={{ height: '40px', width: 'auto' }} />
             <span style={{
               fontFamily: "'Space Mono', monospace",
               fontSize: '9px',
