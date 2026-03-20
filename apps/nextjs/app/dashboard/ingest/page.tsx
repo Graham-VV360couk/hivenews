@@ -281,11 +281,14 @@ export default function IngestPage() {
 
   // Reddit backfill
   const [redditSub, setRedditSub] = useState('');
+  const [redditQuery, setRedditQuery] = useState('');
   const [redditDays, setRedditDays] = useState('90');
   const [redditMax, setRedditMax] = useState('300');
+  const [redditMinScore, setRedditMinScore] = useState('25');
+  const [redditLinksOnly, setRedditLinksOnly] = useState(true);
   const [redditDomains, setRedditDomains] = useState<string[]>([]);
   const [redditRunning, setRedditRunning] = useState(false);
-  const [redditResult, setRedditResult] = useState<Result | null>(null);
+  const [redditResult, setRedditResult] = useState<Result & { filtered_noise?: number } | null>(null);
 
   async function handleHNLive(e: React.FormEvent) {
     e.preventDefault();
@@ -331,10 +334,14 @@ export default function IngestPage() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        action: 'reddit', subreddit: redditSub,
+        action: 'reddit',
+        subreddit: redditSub,
+        search_query: redditQuery,
         domain_tags: redditDomains,
         days_back: parseInt(redditDays) || 90,
         max_items: parseInt(redditMax) || 300,
+        min_score: parseInt(redditMinScore) || 25,
+        links_only: redditLinksOnly,
       }),
     });
     setRedditResult(await res.json());
@@ -452,18 +459,54 @@ export default function IngestPage() {
         </form>
       </Section>
 
-      {/* Reddit Backfill */}
-      <Section title="Reddit — Historical Backfill">
-        <p style={{ margin: '0 0 14px', fontSize: '13px', color: '#555' }}>
-          Pulls top posts from a subreddit via the public Reddit API.
-          Reddit enforces ~1 req/sec so large backfills take a few minutes.
+      {/* Reddit */}
+      <Section title="Reddit — News Extraction">
+        <p style={{ margin: '0 0 10px', fontSize: '13px', color: '#555' }}>
+          Pulls news articles from a subreddit with quality filters to cut out memes, image posts, and low-quality content.
+          For best results, target news-focused subreddits and use a keyword query to narrow the results.
         </p>
+
+        {/* Suggested subreddits */}
+        <div style={{ marginBottom: '16px', padding: '12px 14px', background: '#111', border: '1px solid #222', borderRadius: '4px' }}>
+          <div style={{ fontSize: '11px', color: '#555', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Suggested subreddits by domain</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            {[
+              { domain: 'AI', subs: 'AINews · MachineLearning · artificial · singularity · LocalLLaMA' },
+              { domain: 'VR / AR', subs: 'virtualreality · oculus · augmentedreality · SteamVR' },
+              { domain: 'SEO', subs: 'SEO · bigseo · juststart · webmarketing' },
+              { domain: 'Vibe Coding', subs: 'vibecoding · programming · webdev · LocalLLaMA' },
+              { domain: 'Cross', subs: 'technology · Futurology · technews · worldnews' },
+            ].map(({ domain, subs }) => (
+              <div key={domain} style={{ display: 'flex', gap: '10px', fontSize: '12px' }}>
+                <span style={{ color: '#F5A623', flexShrink: 0, width: '80px' }}>{domain}</span>
+                <span style={{ color: '#444' }}>{subs}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
         <form onSubmit={handleReddit}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '12px' }}>
             <div>
               <label style={labelStyle}>Subreddit (without r/)</label>
               <input required value={redditSub} onChange={e => setRedditSub(e.target.value)}
-                placeholder="e.g. MachineLearning" style={inputStyle} />
+                placeholder="e.g. AINews" style={inputStyle} />
+            </div>
+            <div>
+              <label style={labelStyle}>Keyword filter (optional — recommended)</label>
+              <input value={redditQuery} onChange={e => setRedditQuery(e.target.value)}
+                placeholder="e.g. funding, research, launch" style={inputStyle} />
+              <div style={{ fontSize: '11px', color: '#444', marginTop: '3px' }}>
+                Searches within the subreddit — much better signal/noise than pulling everything
+              </div>
+            </div>
+            <div>
+              <label style={labelStyle}>Min upvotes (noise filter)</label>
+              <input type="number" min="0" max="10000" value={redditMinScore}
+                onChange={e => setRedditMinScore(e.target.value)} style={inputStyle} />
+              <div style={{ fontSize: '11px', color: '#444', marginTop: '3px' }}>
+                25+ recommended · 50+ for busy subs · 0 = no filter
+              </div>
             </div>
             <div>
               <label style={labelStyle}>Days back</label>
@@ -474,6 +517,12 @@ export default function IngestPage() {
               <label style={labelStyle}>Max items</label>
               <input type="number" min="1" max="1000" value={redditMax}
                 onChange={e => setRedditMax(e.target.value)} style={inputStyle} />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: '#666', cursor: 'pointer', marginTop: '18px' }}>
+                <input type="checkbox" checked={redditLinksOnly} onChange={e => setRedditLinksOnly(e.target.checked)} />
+                Links only — skip text/self posts and image hosts
+              </label>
             </div>
           </div>
           <div style={{ marginBottom: '14px' }}>
@@ -487,14 +536,25 @@ export default function IngestPage() {
             border: 'none', borderRadius: '4px', fontSize: '13px',
             fontWeight: 600, cursor: redditRunning ? 'not-allowed' : 'pointer',
           }}>
-            {redditRunning ? 'Backfilling Reddit…' : 'Start Reddit Backfill'}
+            {redditRunning ? 'Fetching Reddit…' : 'Fetch Reddit News'}
           </button>
           {redditRunning && (
             <p style={{ marginTop: '10px', fontSize: '12px', color: '#555' }}>
-              Processing — Reddit rate limits apply (~1 req/sec)…
+              Applying filters — Reddit rate limits apply (~1 req/sec)…
             </p>
           )}
-          {redditResult && <ResultBadge result={redditResult} />}
+          {redditResult && (
+            <div style={{
+              marginTop: '12px', padding: '14px 16px',
+              background: '#0f1a0f', border: '1px solid #1a3a1a', borderRadius: '4px',
+              display: 'flex', gap: '24px', flexWrap: 'wrap',
+            }}>
+              <Stat label="Ingested" value={redditResult.ingested ?? 0} color="#22c55e" />
+              <Stat label="Duplicates skipped" value={redditResult.skipped_duplicates ?? 0} color="#555" />
+              <Stat label="Filtered (noise)" value={redditResult.filtered_noise ?? 0} color="#888" />
+              <Stat label="Errors" value={redditResult.errors ?? 0} color={(redditResult.errors ?? 0) > 0 ? '#ef4444' : '#555'} />
+            </div>
+          )}
         </form>
       </Section>
 
@@ -504,7 +564,7 @@ export default function IngestPage() {
         <ul style={{ margin: 0, padding: '0 0 0 16px', fontSize: '12px', color: '#444', lineHeight: 1.9 }}>
           <li><strong style={{ color: '#555' }}>RSS feeds</strong> — whatever the feed currently contains (typically 2–8 weeks)</li>
           <li><strong style={{ color: '#555' }}>Hacker News</strong> — full archive going back years via Algolia API (free, no key needed)</li>
-          <li><strong style={{ color: '#555' }}>Reddit</strong> — top posts for the period via public API (up to ~1000 posts per run)</li>
+          <li><strong style={{ color: '#555' }}>Reddit</strong> — top/search posts filtered by score, links-only, domain blocklist (imgur, v.redd.it etc.)</li>
           <li><strong style={{ color: '#555' }}>X / LinkedIn / Instagram</strong> — require API credentials (add via Sources page when ready)</li>
         </ul>
       </div>

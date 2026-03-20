@@ -460,52 +460,104 @@ async def backfill_hn(req: HNBackfillRequest) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Reddit backfill (public .json API)
+# Reddit — news extraction with quality filters
 # ---------------------------------------------------------------------------
 
+# Domains that indicate images, videos, or memes — not news articles
+_NOISE_DOMAINS = {
+    "i.redd.it", "v.redd.it", "imgur.com", "i.imgur.com",
+    "gfycat.com", "redgifs.com", "streamable.com",
+    "reddit.com", "old.reddit.com",  # self/discussion posts via URL
+    "gallery",  # reddit galleries
+}
+
+
+def _is_noise(post: dict) -> bool:
+    """Return True if this post should be filtered out as non-news."""
+    # Self/text posts have no external article to link to
+    if post.get("is_self"):
+        return True
+    url = post.get("url", "")
+    # Extract domain from URL
+    try:
+        from urllib.parse import urlparse
+        domain = urlparse(url).netloc.lower().lstrip("www.")
+        if domain in _NOISE_DOMAINS:
+            return True
+        # Image/video file extensions
+        path = urlparse(url).path.lower()
+        if any(path.endswith(ext) for ext in (".jpg", ".jpeg", ".png", ".gif", ".mp4", ".webm")):
+            return True
+    except Exception:
+        pass
+    return False
+
+
 class RedditBackfillRequest(BaseModel):
-    subreddit: str                # e.g. "MachineLearning"
+    subreddit: str                   # e.g. "MachineLearning"
     domain_tags: list[str] = []
     days_back: int = 90
-    max_items: int = 500
+    max_items: int = 300
+    min_score: int = 10              # ignore posts below this upvote count
+    search_query: str = ""           # optional keyword filter within subreddit
+    links_only: bool = True          # skip self/text posts, only external articles
 
 
 @router.post("/backfill/reddit")
 async def backfill_reddit(req: RedditBackfillRequest) -> dict:
     """
-    Backfill posts from a Reddit subreddit via the public JSON API.
-    Uses 'top' listing sorted by 'year' for historical coverage.
+    Pull news articles from a Reddit subreddit.
+
+    Filters applied:
+    - links_only: skip self/text posts (no external article)
+    - min_score: skip low-upvote posts (noise, memes)
+    - domain blocklist: skip image hosts, video hosts, reddit galleries
+    - search_query: if set, uses /search endpoint to find keyword-relevant posts
+
+    Use search_query to narrow a broad subreddit (e.g. r/technology + "AI agents")
+    rather than pulling the full firehose.
     """
     cutoff = datetime.now(timezone.utc) - timedelta(days=req.days_back)
 
-    ingested = skipped = errors = 0
+    ingested = skipped_dup = filtered = errors = 0
     after = None
 
-    # Find or look up the Reddit source id
     async with get_conn() as conn:
         row = await conn.fetchrow(
-            "SELECT id FROM sources WHERE platform = 'reddit' AND LOWER(name) LIKE $1 AND is_active = TRUE LIMIT 1",
+            "SELECT id FROM sources WHERE platform = 'reddit' "
+            "AND LOWER(name) LIKE $1 AND is_active = TRUE LIMIT 1",
             f"%{req.subreddit.lower()}%",
         )
     reddit_source_id = row["id"] if row else None
 
-    headers = {"User-Agent": "NewsHive/1.0 backfill-bot"}
-    base = f"https://www.reddit.com/r/{req.subreddit}/top.json"
+    headers = {"User-Agent": "NewsHive/1.0 news-bot"}
+    time_filter = "year" if req.days_back > 30 else "month"
+
+    # Use search endpoint when a query is provided — much better signal/noise
+    if req.search_query:
+        base = f"https://www.reddit.com/r/{req.subreddit}/search.json"
+    else:
+        base = f"https://www.reddit.com/r/{req.subreddit}/top.json"
 
     async with httpx.AsyncClient(timeout=30, headers=headers) as client:
-        while ingested + skipped < req.max_items:
-            params: dict = {"limit": 100, "t": "year" if req.days_back > 30 else "month"}
+        while (ingested + skipped_dup) < req.max_items:
+            params: dict = {"limit": 100, "t": time_filter}
             if after:
                 params["after"] = after
+            if req.search_query:
+                params["q"] = req.search_query
+                params["restrict_sr"] = "1"
+                params["sort"] = "top"
 
             try:
                 resp = await client.get(base, params=params)
                 if resp.status_code == 429:
-                    log.warning("Reddit rate limited, stopping")
+                    log.warning("Reddit rate limited on r/%s", req.subreddit)
                     break
+                resp.raise_for_status()
                 data = resp.json()
             except Exception as exc:
-                log.error("Reddit API error: %s", exc)
+                log.error("Reddit API error r/%s: %s", req.subreddit, exc)
                 break
 
             posts = data.get("data", {}).get("children", [])
@@ -513,7 +565,7 @@ async def backfill_reddit(req: RedditBackfillRequest) -> dict:
                 break
 
             for post in posts:
-                if ingested + skipped >= req.max_items:
+                if (ingested + skipped_dup) >= req.max_items:
                     break
 
                 p = post["data"]
@@ -521,11 +573,23 @@ async def backfill_reddit(req: RedditBackfillRequest) -> dict:
                 published_at = datetime.fromtimestamp(created_utc, tz=timezone.utc)
 
                 if published_at < cutoff:
+                    filtered += 1
+                    continue
+
+                # Quality filters
+                score = p.get("score", 0)
+                if score < req.min_score:
+                    filtered += 1
+                    continue
+
+                if req.links_only and _is_noise(p):
+                    filtered += 1
                     continue
 
                 url = p.get("url", "")
                 permalink = f"https://reddit.com{p.get('permalink', '')}"
                 title = p.get("title", "")
+                # For link posts, content is usually empty or the crosspost caption
                 content = p.get("selftext", "") or ""
 
                 result = await run_pipeline(
@@ -540,7 +604,7 @@ async def backfill_reddit(req: RedditBackfillRequest) -> dict:
                 if result == "ingested":
                     ingested += 1
                 elif result == "duplicate":
-                    skipped += 1
+                    skipped_dup += 1
                 else:
                     errors += 1
 
@@ -548,13 +612,16 @@ async def backfill_reddit(req: RedditBackfillRequest) -> dict:
             if not after:
                 break
 
-            await asyncio.sleep(1.0)  # Reddit enforces ~1 req/sec
+            await asyncio.sleep(1.0)  # Reddit rate limit ~1 req/sec
 
     return {
         "source": f"reddit/r/{req.subreddit}",
+        "search_query": req.search_query or None,
         "days_back": req.days_back,
+        "min_score": req.min_score,
         "ingested": ingested,
-        "skipped_duplicates": skipped,
+        "skipped_duplicates": skipped_dup,
+        "filtered_noise": filtered,
         "errors": errors,
     }
 
