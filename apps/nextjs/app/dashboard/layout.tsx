@@ -7,6 +7,7 @@ const NAV_ITEMS = [
   { href: '/dashboard/trajectories', label: 'Trajectories' },
   { href: '/dashboard/sources', label: 'Sources' },
   { href: '/dashboard/monthly', label: 'Monthly Report' },
+  { href: '/dashboard/submissions', label: 'Submissions' },
 ];
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
