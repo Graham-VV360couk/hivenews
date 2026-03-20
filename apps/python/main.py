@@ -7,7 +7,7 @@ from slowapi.errors import RateLimitExceeded
 
 from database import init_pool, close_pool
 from redis_client import init_redis, close_redis
-from routers import ingest, score, honeypot, draft, publish, trajectory, monthly
+from routers import ingest, score, honeypot, draft, publish, trajectory, monthly, feed
 
 limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
 
@@ -32,6 +32,7 @@ app.include_router(draft.router)
 app.include_router(publish.router)
 app.include_router(trajectory.router)
 app.include_router(monthly.router)
+app.include_router(feed.router)
 
 
 @app.get("/health")

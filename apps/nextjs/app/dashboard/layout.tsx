@@ -6,6 +6,7 @@ const NAV_ITEMS = [
   { href: '/dashboard/packs', label: 'Content Packs' },
   { href: '/dashboard/trajectories', label: 'Trajectories' },
   { href: '/dashboard/sources', label: 'Sources' },
+  { href: '/dashboard/ingest', label: 'Ingest' },
   { href: '/dashboard/monthly', label: 'Monthly Report' },
   { href: '/dashboard/submissions', label: 'Submissions' },
 ];
