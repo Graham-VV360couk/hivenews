@@ -39,6 +39,8 @@ export default function PackApprovalPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [approvedCount, setApprovedCount] = useState(0);
+  const [publishing, setPublishing] = useState(false);
+  const [publishResult, setPublishResult] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -59,6 +61,24 @@ export default function PackApprovalPage() {
 
   function handleDraftApproved() {
     setApprovedCount(c => c + 1);
+  }
+
+  async function handlePublish() {
+    setPublishing(true);
+    setPublishResult(null);
+    try {
+      const res = await fetch(`/dashboard/api/packs/${id}/publish`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) {
+        setPublishResult(`Error: ${data.error}`);
+      } else {
+        setPublishResult(`Published to ${data.published} platform${data.published !== 1 ? 's' : ''}${data.errors?.length ? ` (${data.errors.length} errors)` : ''}`);
+      }
+    } catch {
+      setPublishResult('Network error');
+    } finally {
+      setPublishing(false);
+    }
   }
 
   if (loading) {
@@ -108,6 +128,41 @@ export default function PackApprovalPage() {
             onApproved={handleDraftApproved}
           />
         ))
+      )}
+
+      {/* Publish section */}
+      {allApproved && pack.status !== 'published' && (
+        <div style={{ marginTop: '24px', padding: '16px', background: '#1a1a1a', border: '1px solid #22c55e', borderRadius: '6px' }}>
+          <p style={{ margin: '0 0 12px', fontSize: '14px', color: '#ccc' }}>
+            All drafts approved. Ready to publish to social platforms.
+          </p>
+          <button
+            onClick={handlePublish}
+            disabled={publishing}
+            style={{
+              padding: '10px 20px',
+              background: publishing ? '#1a3a2a' : '#22c55e',
+              color: '#0f0f0f',
+              border: 'none',
+              borderRadius: '4px',
+              fontSize: '14px',
+              fontWeight: 600,
+              cursor: publishing ? 'not-allowed' : 'pointer',
+            }}
+          >
+            {publishing ? 'Publishing…' : 'Publish Now'}
+          </button>
+          {publishResult && (
+            <p style={{ margin: '12px 0 0', fontSize: '13px', color: '#888' }}>{publishResult}</p>
+          )}
+        </div>
+      )}
+      {pack.status === 'published' && (
+        <div style={{ marginTop: '24px', padding: '16px', background: '#0a1f0a', border: '1px solid #22c55e', borderRadius: '6px' }}>
+          <p style={{ margin: 0, fontSize: '14px', color: '#22c55e' }}>
+            ✓ Published · <a href={`/blog/${pack.id}`} target="_blank" style={{ color: '#22c55e' }}>View blog post →</a>
+          </p>
+        </div>
       )}
     </div>
   );
