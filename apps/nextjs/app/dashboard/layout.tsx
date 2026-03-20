@@ -4,6 +4,9 @@ import Link from 'next/link';
 const NAV_ITEMS = [
   { href: '/dashboard', label: 'Overview' },
   { href: '/dashboard/packs', label: 'Content Packs' },
+  { href: '/dashboard/trajectories', label: 'Trajectories' },
+  { href: '/dashboard/sources', label: 'Sources' },
+  { href: '/dashboard/monthly', label: 'Monthly Report' },
 ];
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
