@@ -1,3 +1,4 @@
+export const dynamic = 'force-dynamic';
 // apps/nextjs/app/blog/[id]/page.tsx
 import { getDb } from '@/lib/db';
 import { notFound } from 'next/navigation';

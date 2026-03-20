@@ -1,3 +1,4 @@
+export const dynamic = 'force-dynamic';
 // apps/nextjs/app/dashboard/api/trajectories/[id]/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 

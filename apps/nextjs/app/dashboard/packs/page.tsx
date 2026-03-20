@@ -1,3 +1,4 @@
+export const dynamic = 'force-dynamic';
 // apps/nextjs/app/dashboard/packs/page.tsx
 import { getDb } from '@/lib/db';
 import { PackCard } from '@/components/PackCard';

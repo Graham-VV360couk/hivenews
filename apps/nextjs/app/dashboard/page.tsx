@@ -1,3 +1,4 @@
+export const dynamic = 'force-dynamic';
 // apps/nextjs/app/dashboard/page.tsx
 import { getDb } from '@/lib/db';
 import { StatsBar } from '@/components/StatsBar';

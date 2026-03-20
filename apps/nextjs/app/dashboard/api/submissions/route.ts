@@ -1,3 +1,4 @@
+export const dynamic = 'force-dynamic';
 // apps/nextjs/app/dashboard/api/submissions/route.ts
 import { NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';

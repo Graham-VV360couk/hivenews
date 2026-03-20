@@ -1,3 +1,4 @@
+export const dynamic = 'force-dynamic';
 // apps/nextjs/app/blog/page.tsx
 import { getDb } from '@/lib/db';
 import Link from 'next/link';
