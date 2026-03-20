@@ -1,0 +1,30 @@
+# docker/docker-compose.tor.yml
+# Tor hidden service for The Honeypot
+# Deploy as a custom Docker application in Coolify on the same network as newshive-nextjs.
+#
+# After deployment, retrieve .onion address:
+#   docker exec [tor-container] cat /var/lib/tor/hidden_service/hostname
+#
+# Add this address to apps/nextjs/app/honeypot/page.tsx (Tor Browser notice).
+
+version: '3.8'
+
+services:
+  tor:
+    image: dperson/torproxy:latest
+    restart: unless-stopped
+    environment:
+      - HIDDENSERVICE=newshive-nextjs:3000
+    volumes:
+      - tor-hidden-service:/var/lib/tor/hidden_service
+    networks:
+      - coolify   # Must be on the same internal Docker network as newshive-nextjs
+
+volumes:
+  tor-hidden-service:
+    driver: local
+
+networks:
+  coolify:
+    external: true
+    name: coolify
