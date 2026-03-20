@@ -103,7 +103,7 @@ async def run_pipeline(
             domain_tags, source_type, embedding
         )
         await mark_seen(url)
-        await assign_cluster(signal_id, embedding)
+        await assign_cluster(signal_id, embedding, domain_tags=domain_tags, title=title)
 
         try:
             source_info = await _get_source_info(source_id)
@@ -737,6 +737,86 @@ async def poll_hn_live(req: HNLiveRequest) -> dict:
         "errors": errors,
         "fetch_errors": unresolved,
     }
+
+
+# ---------------------------------------------------------------------------
+# Name clusters — generate short names for unnamed clusters using Claude Haiku
+# ---------------------------------------------------------------------------
+
+@router.post("/name-clusters")
+async def name_clusters() -> dict:
+    """
+    Find clusters with no name (or a single-signal placeholder that looks like an article title),
+    pull their top 5 signal titles, and ask Claude Haiku for a concise 3-6 word cluster name.
+    Runs in batches; safe to call multiple times.
+    """
+    from anthropic import AsyncAnthropic
+    from config import settings
+
+    client = AsyncAnthropic(api_key=settings.anthropic_api_key)
+
+    async with get_conn() as conn:
+        # Get clusters that have no name or only a long placeholder title
+        clusters = await conn.fetch(
+            """
+            SELECT c.id, c.domain_tags,
+                   array_agg(s.title ORDER BY s.importance_composite DESC NULLS LAST) AS titles
+            FROM clusters c
+            JOIN signals s ON s.cluster_id = c.id
+            WHERE c.is_active = TRUE
+              AND (c.name IS NULL OR length(c.name) > 60)
+            GROUP BY c.id
+            HAVING COUNT(s.id) >= 2
+            LIMIT 50
+            """
+        )
+
+    if not clusters:
+        return {"named": 0, "message": "No unnamed clusters found"}
+
+    named = 0
+    for row in clusters:
+        titles = [t for t in (row["titles"] or []) if t][:5]
+        if not titles:
+            continue
+        domain_hint = ", ".join(row["domain_tags"]) if row["domain_tags"] else "technology"
+        prompt = (
+            f"These news article titles were automatically grouped into one cluster "
+            f"because they cover similar topics (domain: {domain_hint}):\n\n"
+            + "\n".join(f"- {t}" for t in titles)
+            + "\n\nGive this cluster a concise name (3-6 words) that captures "
+            "the common theme. Return ONLY the name, no punctuation, no explanation."
+        )
+        try:
+            resp = await client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=32,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            name = resp.content[0].text.strip().strip('"').strip("'")
+            if name:
+                async with get_conn() as conn:
+                    await conn.execute(
+                        "UPDATE clusters SET name = $1, updated_at = NOW() WHERE id = $2",
+                        name, row["id"]
+                    )
+                    # Also backfill domain_tags from signals if empty
+                    await conn.execute(
+                        """
+                        UPDATE clusters SET domain_tags = (
+                            SELECT array_agg(DISTINCT dt)
+                            FROM signals s, unnest(s.domain_tags) dt
+                            WHERE s.cluster_id = $1
+                        )
+                        WHERE id = $1 AND domain_tags = '{}'
+                        """,
+                        row["id"]
+                    )
+                named += 1
+        except Exception as exc:
+            log.warning("Failed to name cluster %s: %s", row["id"], exc)
+
+    return {"named": named, "total_processed": len(clusters)}
 
 
 # ---------------------------------------------------------------------------

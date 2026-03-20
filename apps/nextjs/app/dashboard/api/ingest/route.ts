@@ -61,6 +61,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(data);
     }
 
+    // Name unnamed clusters
+    if (action === 'name-clusters') {
+      const res = await fetch(`${PYTHON_URL}/feed/name-clusters`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) return NextResponse.json(data, { status: res.status });
+      return NextResponse.json(data);
+    }
+
     const endpoints: Record<string, string> = {
       poll:      '/feed/poll',
       'hn-live': '/feed/hn-live',

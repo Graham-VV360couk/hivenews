@@ -14,9 +14,15 @@ from database import get_conn
 _SIMILARITY_THRESHOLD = 0.3  # cosine distance — lower = more similar
 
 
-async def assign_cluster(signal_id: UUID, embedding: list[float]) -> UUID:
+async def assign_cluster(
+    signal_id: UUID,
+    embedding: list[float],
+    domain_tags: list[str] | None = None,
+    title: str | None = None,
+) -> UUID:
     """Return cluster UUID. Creates a new cluster if no match within threshold."""
     emb_array = np.array(embedding, dtype=np.float32)
+    tags = domain_tags or []
 
     async with get_conn() as conn:
         # Find nearest active cluster within the similarity threshold
@@ -41,27 +47,40 @@ async def assign_cluster(signal_id: UUID, embedding: list[float]) -> UUID:
             old_centroid = np.array(row["centroid_embedding"], dtype=np.float32)
             new_centroid = ((old_centroid * n) + emb_array) / (n + 1)
 
+            # Merge domain_tags into the cluster if it has none yet
             await conn.execute(
                 """
                 UPDATE clusters SET
                     signal_count = signal_count + 1,
                     centroid_embedding = $1::vector,
                     last_signal_at = NOW(),
-                    updated_at = NOW()
+                    updated_at = NOW(),
+                    domain_tags = CASE
+                        WHEN domain_tags = '{}' AND $3::text[] != '{}' THEN $3
+                        ELSE domain_tags
+                    END
                 WHERE id = $2
                 """,
                 new_centroid.tolist(),
                 cluster_id,
+                tags,
             )
         else:
-            # No matching cluster — create one with this signal's embedding as centroid
+            # No matching cluster — create one seeded with this signal's data
+            placeholder_name = (title or "")[:80] or None
             new_row = await conn.fetchrow(
                 """
-                INSERT INTO clusters (centroid_embedding, signal_count, first_signal_at, last_signal_at)
-                VALUES ($1::vector, 1, NOW(), NOW())
+                INSERT INTO clusters (
+                    centroid_embedding, signal_count,
+                    first_signal_at, last_signal_at,
+                    domain_tags, name
+                )
+                VALUES ($1::vector, 1, NOW(), NOW(), $2, $3)
                 RETURNING id
                 """,
                 emb_array.tolist(),
+                tags,
+                placeholder_name,
             )
             cluster_id = new_row["id"]
 
