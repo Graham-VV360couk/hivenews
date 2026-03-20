@@ -22,5 +22,6 @@ async def generate_embedding(text: str) -> list[float]:
     response = await _get_client().embeddings.create(
         model=_MODEL,
         input=truncated,
+        dimensions=1536,
     )
     return response.data[0].embedding
