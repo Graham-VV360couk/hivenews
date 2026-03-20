@@ -16,5 +16,15 @@ class Settings(BaseSettings):
     heygen_voice_id: str = ""
     honeypot_encryption_key: str = ""
 
+    # Social / distribution
+    x_api_key: str = ""
+    x_api_secret: str = ""
+    x_access_token: str = ""
+    x_access_secret: str = ""
+    linkedin_access_token: str = ""
+    linkedin_person_id: str = ""
+    facebook_page_access_token: str = ""
+    facebook_page_id: str = ""
+
 
 settings = Settings()
