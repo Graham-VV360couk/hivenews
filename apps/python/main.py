@@ -4,7 +4,7 @@ from fastapi import FastAPI
 
 from database import init_pool, close_pool
 from redis_client import init_redis, close_redis
-from routers import ingest, score, honeypot, draft, publish
+from routers import ingest, score, honeypot, draft, publish, trajectory, monthly
 
 
 @asynccontextmanager
@@ -23,6 +23,8 @@ app.include_router(score.router)
 app.include_router(honeypot.router)
 app.include_router(draft.router)
 app.include_router(publish.router)
+app.include_router(trajectory.router)
+app.include_router(monthly.router)
 
 
 @app.get("/health")
