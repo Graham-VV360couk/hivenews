@@ -4,11 +4,16 @@ from uuid import uuid4
 
 async def test_ingest_new_signal_returns_id(client):
     signal_id = uuid4()
+    cluster_id = uuid4()
     with patch("routers.ingest.is_duplicate", new_callable=AsyncMock, return_value=False), \
          patch("routers.ingest.mark_seen", new_callable=AsyncMock), \
          patch("routers.ingest.generate_embedding", new_callable=AsyncMock, return_value=[0.1] * 1536), \
          patch("routers.ingest._store_signal", new_callable=AsyncMock, return_value=signal_id), \
-         patch("routers.ingest.assign_cluster", new_callable=AsyncMock, return_value=uuid4()):
+         patch("routers.ingest.assign_cluster", new_callable=AsyncMock, return_value=cluster_id), \
+         patch("routers.ingest._get_source_info", new_callable=AsyncMock, return_value=None), \
+         patch("routers.ingest.score_signal", new_callable=AsyncMock, return_value=None), \
+         patch("routers.ingest._get_signal_cluster", new_callable=AsyncMock, return_value=cluster_id), \
+         patch("routers.ingest.recalculate_cluster_readiness", new_callable=AsyncMock):
         response = await client.post("/ingest", json={
             "url": "https://example.com/new-article",
             "title": "Big AI announcement",
