@@ -14,19 +14,24 @@ async function getStories(): Promise<Story[]> {
     const sql = getDb();
     const rows = await sql<Story[]>`
       SELECT
-        id,
-        name,
-        description,
-        domain_tags,
-        confidence_score,
-        confidence_direction,
-        status,
-        last_updated_at
-      FROM trajectories
-      WHERE status IN ('active', 'confirmed')
-        AND confidence_score IS NOT NULL
-      ORDER BY confidence_score DESC, last_updated_at DESC NULLS LAST
-      LIMIT 30
+        s.id,
+        s.title                                       AS name,
+        LEFT(s.content, 300)                          AS description,
+        s.domain_tags,
+        COALESCE(s.importance_composite, 0)::float    AS confidence_score,
+        CASE WHEN s.is_alert_candidate THEN 'rising' ELSE 'stable' END AS confidence_direction,
+        COALESCE(s.confidence_level, 'unassessed')    AS status,
+        COALESCE(s.published_at, s.ingested_at)       AS last_updated_at,
+        s.url
+      FROM signals s
+      WHERE s.importance_composite IS NOT NULL
+        AND s.is_public = TRUE
+        AND COALESCE(s.published_at, s.ingested_at) > NOW() - INTERVAL '90 days'
+      ORDER BY
+        s.is_alert_candidate DESC,
+        s.importance_composite DESC,
+        COALESCE(s.published_at, s.ingested_at) DESC NULLS LAST
+      LIMIT 60
     `;
     return rows;
   } catch {

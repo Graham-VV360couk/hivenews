@@ -13,13 +13,14 @@ export interface Story {
   confidence_direction: string;
   status: string;
   last_updated_at: string | null;
+  url?: string | null;
 }
 
 type Tier = 'alert' | 'confirmed' | 'possible' | 'salt';
 
 function getTier(story: Story): Tier {
-  if (story.confidence_score >= 8.5 && story.confidence_direction === 'rising') return 'alert';
-  if (story.status === 'confirmed' || story.confidence_score >= 7.5) return 'confirmed';
+  if (story.confidence_direction === 'rising' && story.confidence_score >= 8.0) return 'alert';
+  if (story.confidence_score >= 7.0) return 'confirmed';
   if (story.confidence_score >= 4.5) return 'possible';
   return 'salt';
 }
@@ -168,16 +169,14 @@ function StoryCard({ story, delay }: { story: Story; delay: number }) {
           </div>
 
           {/* Title */}
-          <h3 style={{
-            margin: '0 0 8px',
-            fontFamily: "'Cormorant Garamond', Georgia, serif",
-            fontSize: '20px',
-            fontWeight: 600,
-            color: hovered ? '#f0f1f8' : '#d8dae8',
-            lineHeight: 1.3,
-            transition: 'color 0.2s ease',
-          }}>
-            {story.name}
+          <h3 style={{ margin: '0 0 8px', fontFamily: "'Cormorant Garamond', Georgia, serif", fontSize: '20px', fontWeight: 600, lineHeight: 1.3 }}>
+            {story.url ? (
+              <a href={story.url} target="_blank" rel="noopener noreferrer" style={{ color: hovered ? '#f0f1f8' : '#d8dae8', textDecoration: 'none', transition: 'color 0.2s ease' }}>
+                {story.name}
+              </a>
+            ) : (
+              <span style={{ color: hovered ? '#f0f1f8' : '#d8dae8', transition: 'color 0.2s ease' }}>{story.name}</span>
+            )}
           </h3>
 
           {/* Description */}

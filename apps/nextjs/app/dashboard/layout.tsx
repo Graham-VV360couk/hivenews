@@ -5,6 +5,7 @@ const NAV_ITEMS = [
   { href: '/dashboard', label: 'Overview' },
   { href: '/dashboard/packs', label: 'Content Packs' },
   { href: '/dashboard/trajectories', label: 'Trajectories' },
+  { href: '/dashboard/signals', label: 'Signals' },
   { href: '/dashboard/sources', label: 'Sources' },
   { href: '/dashboard/ingest', label: 'Ingest' },
   { href: '/dashboard/monthly', label: 'Monthly Report' },
