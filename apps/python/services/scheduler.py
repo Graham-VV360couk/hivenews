@@ -12,9 +12,10 @@ import logging
 
 log = logging.getLogger(__name__)
 
-_RSS_INTERVAL = 2 * 3600   # 2 hours
-_X_INTERVAL   = 15 * 60    # 15 minutes
-_WARMUP        = 60         # seconds after startup before first run
+_RSS_INTERVAL    = 2 * 3600   # 2 hours
+_REDDIT_INTERVAL = 1 * 3600   # 1 hour  — /new sorted, catches early signals
+_X_INTERVAL      = 15 * 60    # 15 minutes (placeholder)
+_WARMUP          = 60         # seconds after startup before first run
 
 
 async def _rss_poll_loop():
@@ -35,6 +36,24 @@ async def _rss_poll_loop():
         await asyncio.sleep(_RSS_INTERVAL)
 
 
+async def _reddit_poll_loop():
+    await asyncio.sleep(_WARMUP + 90)  # stagger behind RSS
+    while True:
+        try:
+            log.info("Scheduler: starting Reddit poll")
+            from routers.feed import poll_reddit_sources
+            result = await poll_reddit_sources()
+            log.info(
+                "Scheduler: Reddit poll complete — ingested=%s skipped=%s errors=%s",
+                result.get("ingested"),
+                result.get("skipped_duplicates"),
+                result.get("errors"),
+            )
+        except Exception as exc:
+            log.error("Scheduler: Reddit poll failed: %s", exc)
+        await asyncio.sleep(_REDDIT_INTERVAL)
+
+
 async def _x_poll_loop():
     await asyncio.sleep(_WARMUP + 30)  # stagger slightly behind RSS
     while True:
@@ -51,6 +70,7 @@ async def _x_poll_loop():
 
 def start_scheduler() -> None:
     """Create background polling tasks. Must be called inside an async context."""
-    asyncio.create_task(_rss_poll_loop(), name="scheduler-rss")
-    asyncio.create_task(_x_poll_loop(),   name="scheduler-x")
-    log.info("Scheduler started — RSS every 2h, X every 15min")
+    asyncio.create_task(_rss_poll_loop(),    name="scheduler-rss")
+    asyncio.create_task(_reddit_poll_loop(), name="scheduler-reddit")
+    asyncio.create_task(_x_poll_loop(),      name="scheduler-x")
+    log.info("Scheduler started — RSS every 2h, Reddit every 1h, X every 15min")

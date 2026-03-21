@@ -1054,6 +1054,200 @@ async def feed_health() -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Reddit scheduled poll — sorts by New, detects early signals, fetches comments
+# ---------------------------------------------------------------------------
+
+# Trigger phrases that indicate a post worth fetching comments for
+_REDDIT_SIGNAL_PHRASES = {
+    "just dropped", "just released", "just launched", "just shipped",
+    "benchmark", "benchmarks", "vs ", " vs.", "comparison",
+    "outperforms", "beats gpt", "beats claude", "beats gemini",
+    "state of the art", "sota", "new model", "new paper",
+    "open source", "open-source", "github.com",
+}
+
+_NOISE_DOMAINS = {
+    "i.redd.it", "v.redd.it", "imgur.com", "i.imgur.com",
+    "gfycat.com", "redgifs.com", "streamable.com",
+    "reddit.com", "old.reddit.com",
+}
+
+
+def _is_high_signal(post: dict) -> bool:
+    """Return True if this post warrants fetching its comments."""
+    title = (post.get("title") or "").lower()
+    url   = (post.get("url") or "").lower()
+    text  = (post.get("selftext") or "").lower()
+    combined = f"{title} {url} {text}"
+    if "github.com" in url or "github.com" in text:
+        return True
+    return any(phrase in combined for phrase in _REDDIT_SIGNAL_PHRASES)
+
+
+def _extract_subreddit(source) -> str | None:
+    """Get subreddit name from source handle or URL."""
+    if source["handle"]:
+        h = source["handle"].strip()
+        if h.startswith("r/"):
+            h = h[2:]
+        return h.lstrip("/")
+    url = source["url"] or ""
+    # e.g. https://reddit.com/r/MachineLearning
+    parts = [p for p in url.split("/") if p]
+    if "r" in parts:
+        idx = parts.index("r")
+        if idx + 1 < len(parts):
+            return parts[idx + 1]
+    return None
+
+
+async def _fetch_top_comments(client: httpx.AsyncClient, subreddit: str, post_id: str, n: int = 5) -> str:
+    """Fetch the top N root comments for a post. Returns them as a single string."""
+    try:
+        url = f"https://www.reddit.com/r/{subreddit}/comments/{post_id}.json"
+        resp = await client.get(url, params={"limit": 20, "sort": "top", "depth": 1})
+        if resp.status_code != 200:
+            return ""
+        data = resp.json()
+        comments_listing = data[1]["data"]["children"] if len(data) > 1 else []
+        texts = []
+        for c in comments_listing[:n]:
+            body = (c.get("data") or {}).get("body", "").strip()
+            if body and body != "[deleted]" and body != "[removed]":
+                texts.append(body)
+        return "\n\n".join(texts)
+    except Exception:
+        return ""
+
+
+async def poll_reddit_sources() -> dict:
+    """
+    Poll all active Reddit sources, sorting by New to catch early signals.
+    Fetches comments for high-signal posts (GitHub links, benchmarks, etc.).
+    """
+    async with get_conn() as conn:
+        sources = await conn.fetch(
+            "SELECT id, name, url, handle, domain_tags, last_ingested "
+            "FROM sources "
+            "WHERE platform = 'reddit' AND is_active = TRUE"
+        )
+
+    if not sources:
+        return {"sources_polled": 0, "ingested": 0, "skipped_duplicates": 0, "errors": 0}
+
+    ingested = skipped = errors = 0
+    headers = {"User-Agent": "NewsHive/1.0 news-signal-bot"}
+
+    async with httpx.AsyncClient(timeout=20, headers=headers) as client:
+        for source in sources:
+            subreddit = _extract_subreddit(source)
+            if not subreddit:
+                log.warning("Reddit source %s has no subreddit — skipping", source["name"])
+                continue
+
+            last_ingested = source["last_ingested"]
+            cutoff: datetime | None = None
+            if last_ingested:
+                li = last_ingested
+                if li.tzinfo is None:
+                    li = li.replace(tzinfo=timezone.utc)
+                cutoff = li - timedelta(minutes=5)  # small overlap to catch stragglers
+
+            try:
+                resp = await client.get(
+                    f"https://www.reddit.com/r/{subreddit}/new.json",
+                    params={"limit": 100},
+                )
+                if resp.status_code == 429:
+                    log.warning("Reddit rate limited on r/%s", subreddit)
+                    continue
+                resp.raise_for_status()
+                posts = resp.json().get("data", {}).get("children", [])
+            except Exception as exc:
+                log.warning("Reddit fetch failed r/%s: %s", subreddit, exc)
+                errors += 1
+                continue
+
+            source_ingested = 0
+            for child in posts:
+                p = child.get("data", {})
+
+                # Skip deleted, removed, NSFW
+                if p.get("removed_by_category") or p.get("over_18"):
+                    continue
+
+                # Skip images/videos/noise domains
+                post_url = p.get("url", "")
+                try:
+                    from urllib.parse import urlparse
+                    domain = urlparse(post_url).netloc.lower().lstrip("www.")
+                    if domain in _NOISE_DOMAINS:
+                        continue
+                    path = urlparse(post_url).path.lower()
+                    if any(path.endswith(ext) for ext in (".jpg", ".jpeg", ".png", ".gif", ".mp4", ".webm")):
+                        continue
+                except Exception:
+                    pass
+
+                created_utc = p.get("created_utc", 0)
+                published_at = datetime.fromtimestamp(created_utc, tz=timezone.utc)
+
+                if cutoff and published_at < cutoff:
+                    continue  # already seen
+
+                title    = p.get("title", "")
+                selftext = p.get("selftext", "") or ""
+                post_id  = p.get("id", "")
+
+                # Fetch comments for high-signal posts — the insight is often there
+                comment_text = ""
+                if _is_high_signal(p) and post_id:
+                    comment_text = await _fetch_top_comments(client, subreddit, post_id)
+                    await asyncio.sleep(1.0)  # respect Reddit rate limit after comment fetch
+
+                content = selftext
+                if comment_text:
+                    content = f"{selftext}\n\n--- Top comments ---\n{comment_text}".strip()
+
+                permalink = f"https://reddit.com{p.get('permalink', '')}"
+
+                result = await run_pipeline(
+                    source_id=source["id"],
+                    title=title,
+                    content=content,
+                    url=post_url or permalink,
+                    published_at=published_at,
+                    domain_tags=list(source["domain_tags"] or []),
+                    source_type="reddit",
+                )
+                if result == "ingested":
+                    ingested += 1
+                    source_ingested += 1
+                elif result == "duplicate":
+                    skipped += 1
+                else:
+                    errors += 1
+
+                await asyncio.sleep(1.0)  # ~1 req/sec Reddit limit
+
+            log.info("Reddit r/%s: ingested=%d", subreddit, source_ingested)
+
+            async with get_conn() as conn:
+                await conn.execute(
+                    "UPDATE sources SET last_ingested = NOW() WHERE id = $1", source["id"]
+                )
+
+            await asyncio.sleep(2.0)  # pause between subreddits
+
+    return {
+        "sources_polled": len(sources),
+        "ingested": ingested,
+        "skipped_duplicates": skipped,
+        "errors": errors,
+    }
+
+
+# ---------------------------------------------------------------------------
 # X / Twitter poll — placeholder until API credentials are configured
 # ---------------------------------------------------------------------------
 

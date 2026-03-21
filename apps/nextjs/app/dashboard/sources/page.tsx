@@ -63,7 +63,7 @@ export default function SourcesPage() {
     e.preventDefault();
     setSaving(true);
     setSaveError(null);
-    const tags = form.domain_tags.split(',').map(t => t.trim()).filter(Boolean);
+    const tags = [...new Set(form.domain_tags.split(',').map(t => t.trim()).filter(Boolean))];
     const body = { ...form, domain_tags: tags };
 
     if (editId) {
@@ -104,7 +104,7 @@ export default function SourcesPage() {
       handle: s.handle || '',
       url: s.url || '',
       platform: s.platform,
-      domain_tags: (s.domain_tags || []).join(', '),
+      domain_tags: [...new Set(s.domain_tags || [])].join(', '),
       tier: String(s.tier),
     });
     setEditId(s.id);
@@ -372,41 +372,48 @@ export default function SourcesPage() {
                   <td style={{ padding: '10px 16px', textAlign: 'right' }}>
                     {confirmDelete === s.id ? (
                       <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end', alignItems: 'center' }}>
-                        <span style={{ fontSize: '12px', color: '#888' }}>Delete?</span>
+                        <span style={{ fontSize: '11px', color: '#888' }}>Delete?</span>
                         <button
                           onClick={() => handleDelete(s.id)}
                           disabled={deleting === s.id}
-                          style={{ padding: '4px 10px', background: '#2a0a0a', border: '1px solid #5a1a1a', color: '#ef4444', borderRadius: '3px', fontSize: '12px', cursor: 'pointer' }}
+                          style={iconBtn('#2a0a0a', '#5a1a1a', '#ef4444')}
                         >
                           {deleting === s.id ? '…' : 'Yes'}
                         </button>
                         <button
                           onClick={() => setConfirmDelete(null)}
-                          style={{ padding: '4px 10px', background: '#111', border: '1px solid #333', color: '#aaa', borderRadius: '3px', fontSize: '12px', cursor: 'pointer' }}
+                          style={iconBtn('#111', '#333', '#aaa')}
                         >
                           No
                         </button>
                       </div>
                     ) : (
-                      <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end' }}>
+                      <div style={{ display: 'flex', gap: '4px', justifyContent: 'flex-end' }}>
                         <button
                           onClick={() => startEdit(s)}
-                          style={{ padding: '4px 10px', background: '#111', border: '1px solid #333', color: '#aaa', borderRadius: '3px', fontSize: '12px', cursor: 'pointer' }}
+                          title="Edit"
+                          style={iconBtn('#111', '#333', '#aaa')}
                         >
-                          Edit
+                          ✏
                         </button>
                         <button
                           onClick={() => toggleActive(s.id)}
                           disabled={toggling === s.id}
-                          style={{ padding: '4px 10px', background: s.is_active ? '#111' : '#1a2a1a', border: `1px solid ${s.is_active ? '#333' : '#2a4a2a'}`, color: s.is_active ? '#888' : '#22c55e', borderRadius: '3px', fontSize: '12px', cursor: 'pointer' }}
+                          title={s.is_active ? 'Pause' : 'Activate'}
+                          style={iconBtn(
+                            s.is_active ? '#111' : '#1a2a1a',
+                            s.is_active ? '#333' : '#2a4a2a',
+                            s.is_active ? '#888' : '#22c55e',
+                          )}
                         >
-                          {toggling === s.id ? '…' : s.is_active ? 'Pause' : 'Activate'}
+                          {toggling === s.id ? '…' : s.is_active ? '⏸' : '▶'}
                         </button>
                         <button
                           onClick={() => setConfirmDelete(s.id)}
-                          style={{ padding: '4px 10px', background: '#111', border: '1px solid #2a1a1a', color: '#662222', borderRadius: '3px', fontSize: '12px', cursor: 'pointer' }}
+                          title="Delete"
+                          style={iconBtn('#111', '#2a1a1a', '#662222')}
                         >
-                          Delete
+                          🗑
                         </button>
                       </div>
                     )}
@@ -431,6 +438,17 @@ const inputStyle: React.CSSProperties = {
   fontSize: '14px',
   boxSizing: 'border-box',
 };
+
+const iconBtn = (bg: string, border: string, color: string): React.CSSProperties => ({
+  padding: '4px 8px',
+  background: bg,
+  border: `1px solid ${border}`,
+  color,
+  borderRadius: '3px',
+  fontSize: '13px',
+  cursor: 'pointer',
+  lineHeight: 1,
+});
 
 const th: React.CSSProperties = {
   padding: '10px 16px',
