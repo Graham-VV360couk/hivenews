@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     heygen_voice_id: str = ""
     honeypot_encryption_key: str = ""
 
+    # RSSHub — self-hosted RSS proxy (enables X/Twitter polling and other sources)
+    rsshub_base_url: str = ""   # e.g. https://rsshub.geekybee.net
+
     # Social / distribution
     x_api_key: str = ""
     x_api_secret: str = ""

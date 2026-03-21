@@ -186,7 +186,7 @@ async def poll_rss_sources() -> dict:
     async with get_conn() as conn:
         sources = await conn.fetch(
             "SELECT id, name, url, domain_tags, last_ingested FROM sources "
-            "WHERE platform = 'rss' AND is_active = TRUE AND url IS NOT NULL"
+            "WHERE platform IN ('rss', 'github') AND is_active = TRUE AND url IS NOT NULL"
         )
 
     ingested = skipped = errors = 0
@@ -313,7 +313,7 @@ async def poll_rss_stream() -> StreamingResponse:
             sources = await conn.fetch(
                 "SELECT id, name, url, domain_tags, last_ingested "
                 "FROM sources "
-                "WHERE platform = 'rss' AND is_active = TRUE AND url IS NOT NULL "
+                "WHERE platform IN ('rss', 'github') AND is_active = TRUE AND url IS NOT NULL "
                 "ORDER BY name"
             )
 
@@ -1151,33 +1151,34 @@ async def poll_reddit_sources() -> dict:
                 li = last_ingested
                 if li.tzinfo is None:
                     li = li.replace(tzinfo=timezone.utc)
-                cutoff = li - timedelta(minutes=5)  # small overlap to catch stragglers
+                cutoff = li - timedelta(minutes=5)
 
+            # Use RSS feed — no auth required, no 403s
+            # JSON API requires OAuth; RSS is publicly accessible
+            rss_url = f"https://www.reddit.com/r/{subreddit}/new.rss"
             try:
-                resp = await client.get(
-                    f"https://www.reddit.com/r/{subreddit}/new.json",
-                    params={"limit": 100},
-                )
+                resp = await client.get(rss_url)
                 if resp.status_code == 429:
                     log.warning("Reddit rate limited on r/%s", subreddit)
+                    await asyncio.sleep(10)
                     continue
-                resp.raise_for_status()
-                posts = resp.json().get("data", {}).get("children", [])
+                if resp.status_code >= 400:
+                    log.warning("Reddit fetch failed r/%s: HTTP %s", subreddit, resp.status_code)
+                    errors += 1
+                    continue
+                feed = await _parse_feed(resp.text)
             except Exception as exc:
                 log.warning("Reddit fetch failed r/%s: %s", subreddit, exc)
                 errors += 1
                 continue
 
             source_ingested = 0
-            for child in posts:
-                p = child.get("data", {})
-
-                # Skip deleted, removed, NSFW
-                if p.get("removed_by_category") or p.get("over_18"):
+            for entry in feed.entries[:100]:
+                post_url = entry.get("link", "")
+                if not post_url:
                     continue
 
-                # Skip images/videos/noise domains
-                post_url = p.get("url", "")
+                # Skip noise domains
                 try:
                     from urllib.parse import urlparse
                     domain = urlparse(post_url).netloc.lower().lstrip("www.")
@@ -1189,33 +1190,39 @@ async def poll_reddit_sources() -> dict:
                 except Exception:
                     pass
 
-                created_utc = p.get("created_utc", 0)
-                published_at = datetime.fromtimestamp(created_utc, tz=timezone.utc)
+                published_at = None
+                if pt := entry.get("published_parsed"):
+                    try:
+                        published_at = datetime(*pt[:6], tzinfo=timezone.utc)
+                    except Exception:
+                        pass
 
-                if cutoff and published_at < cutoff:
-                    continue  # already seen
+                if cutoff and published_at and published_at < cutoff:
+                    continue
 
-                title    = p.get("title", "")
-                selftext = p.get("selftext", "") or ""
-                post_id  = p.get("id", "")
+                title   = entry.get("title", "")
+                content = entry.get("summary", "") or ""
 
-                # Fetch comments for high-signal posts — the insight is often there
-                comment_text = ""
-                if _is_high_signal(p) and post_id:
-                    comment_text = await _fetch_top_comments(client, subreddit, post_id)
-                    await asyncio.sleep(1.0)  # respect Reddit rate limit after comment fetch
-
-                content = selftext
-                if comment_text:
-                    content = f"{selftext}\n\n--- Top comments ---\n{comment_text}".strip()
-
-                permalink = f"https://reddit.com{p.get('permalink', '')}"
+                # Best-effort comment fetch for high-signal posts via JSON API
+                # Extract post ID from URL: /r/sub/comments/{id}/title/
+                try:
+                    parts = [p for p in post_url.split("/") if p]
+                    if "comments" in parts:
+                        post_id = parts[parts.index("comments") + 1]
+                        signal_data = {"title": title, "selftext": content, "url": post_url}
+                        if _is_high_signal(signal_data) and post_id:
+                            comment_text = await _fetch_top_comments(client, subreddit, post_id)
+                            if comment_text:
+                                content = f"{content}\n\n--- Top comments ---\n{comment_text}".strip()
+                            await asyncio.sleep(2.0)
+                except Exception:
+                    pass
 
                 result = await run_pipeline(
                     source_id=source["id"],
                     title=title,
                     content=content,
-                    url=post_url or permalink,
+                    url=post_url,
                     published_at=published_at,
                     domain_tags=list(source["domain_tags"] or []),
                     source_type="reddit",
@@ -1228,7 +1235,7 @@ async def poll_reddit_sources() -> dict:
                 else:
                     errors += 1
 
-                await asyncio.sleep(1.0)  # ~1 req/sec Reddit limit
+                await asyncio.sleep(1.0)
 
             log.info("Reddit r/%s: ingested=%d", subreddit, source_ingested)
 
@@ -1237,7 +1244,7 @@ async def poll_reddit_sources() -> dict:
                     "UPDATE sources SET last_ingested = NOW() WHERE id = $1", source["id"]
                 )
 
-            await asyncio.sleep(2.0)  # pause between subreddits
+            await asyncio.sleep(2.0)
 
     return {
         "sources_polled": len(sources),
@@ -1253,11 +1260,110 @@ async def poll_reddit_sources() -> dict:
 
 async def poll_x_sources() -> dict:
     """
-    Poll active X / Twitter sources.
-    Not yet implemented — raises NotImplementedError until X API credentials
-    are configured and the poller is built out.
+    Poll active X / Twitter sources via RSSHub.
+    Requires RSSHUB_BASE_URL to be set in config.
+    Each source needs either a full feed URL or a handle — we construct
+    {rsshub_base_url}/twitter/user/{handle} for handle-only sources.
     """
-    raise NotImplementedError("X polling not yet configured")
+    rsshub_base = (settings.rsshub_base_url or "").rstrip("/")
+    if not rsshub_base:
+        raise NotImplementedError("X polling requires RSSHUB_BASE_URL to be configured")
+
+    async with get_conn() as conn:
+        sources = await conn.fetch(
+            "SELECT id, name, url, handle, domain_tags, last_ingested "
+            "FROM sources WHERE platform = 'x' AND is_active = TRUE"
+        )
+
+    if not sources:
+        return {"sources_polled": 0, "ingested": 0, "skipped_duplicates": 0, "errors": 0}
+
+    ingested = skipped = errors = 0
+    headers = {"User-Agent": "NewsHive/1.0 (+https://newshive.geekybee.net)"}
+
+    async with httpx.AsyncClient(timeout=20, headers=headers) as client:
+        for source in sources:
+            # Determine feed URL
+            feed_url = source["url"] or ""
+            if not feed_url:
+                handle = (source["handle"] or "").lstrip("@")
+                if not handle:
+                    log.warning("X source %s has no URL or handle — skipping", source["name"])
+                    continue
+                feed_url = f"{rsshub_base}/twitter/user/{handle}"
+
+            last_ingested = source["last_ingested"]
+            cutoff: datetime | None = None
+            if last_ingested:
+                li = last_ingested
+                if li.tzinfo is None:
+                    li = li.replace(tzinfo=timezone.utc)
+                cutoff = li - timedelta(minutes=5)
+
+            try:
+                resp = await client.get(feed_url)
+                if resp.status_code == 429:
+                    log.warning("X/RSSHub rate limited on %s", source["name"])
+                    await asyncio.sleep(10)
+                    continue
+                if resp.status_code >= 400:
+                    log.warning("X/RSSHub fetch failed %s: HTTP %s", source["name"], resp.status_code)
+                    errors += 1
+                    continue
+                feed = await _parse_feed(resp.text)
+            except Exception as exc:
+                log.warning("X/RSSHub fetch failed %s: %s", source["name"], exc)
+                errors += 1
+                continue
+
+            source_ingested = 0
+            for entry in feed.entries[:50]:
+                url = entry.get("link", "")
+                if not url:
+                    continue
+
+                published_at = None
+                if pt := entry.get("published_parsed"):
+                    try:
+                        published_at = datetime(*pt[:6], tzinfo=timezone.utc)
+                    except Exception:
+                        pass
+
+                if cutoff and published_at and published_at < cutoff:
+                    continue
+
+                result = await run_pipeline(
+                    source_id=source["id"],
+                    title=entry.get("title", ""),
+                    content=entry.get("summary", "") or "",
+                    url=url,
+                    published_at=published_at,
+                    domain_tags=list(source["domain_tags"] or []),
+                    source_type="x",
+                )
+                if result == "ingested":
+                    ingested += 1
+                    source_ingested += 1
+                elif result == "duplicate":
+                    skipped += 1
+                else:
+                    errors += 1
+
+                await asyncio.sleep(0.5)
+
+            log.info("X @%s: ingested=%d", source["handle"] or source["name"], source_ingested)
+            async with get_conn() as conn:
+                await conn.execute(
+                    "UPDATE sources SET last_ingested = NOW() WHERE id = $1", source["id"]
+                )
+            await asyncio.sleep(2.0)
+
+    return {
+        "sources_polled": len(sources),
+        "ingested": ingested,
+        "skipped_duplicates": skipped,
+        "errors": errors,
+    }
 
 
 # ---------------------------------------------------------------------------

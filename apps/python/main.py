@@ -17,19 +17,22 @@ limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
 
 
 async def _run_migrations():
-    """Run any pending migrations safely (all use IF NOT EXISTS)."""
-    migration_file = os.path.join(os.path.dirname(__file__), "migrations", "002_living_story.sql")
-    if not os.path.exists(migration_file):
+    """Run all migrations in order. Each file is idempotent (IF NOT EXISTS / WHERE NOT EXISTS)."""
+    migrations_dir = os.path.join(os.path.dirname(__file__), "migrations")
+    if not os.path.isdir(migrations_dir):
         return
-    with open(migration_file) as f:
-        sql = f.read()
-    try:
-        from database import get_conn
-        async with get_conn() as conn:
-            await conn.execute(sql)
-        log.info("Migration 002_living_story applied")
-    except Exception as exc:
-        log.error("Migration failed: %s", exc)
+    files = sorted(f for f in os.listdir(migrations_dir) if f.endswith(".sql"))
+    from database import get_conn
+    for fname in files:
+        path = os.path.join(migrations_dir, fname)
+        with open(path) as f:
+            sql = f.read()
+        try:
+            async with get_conn() as conn:
+                await conn.execute(sql)
+            log.info("Migration applied: %s", fname)
+        except Exception as exc:
+            log.error("Migration failed (%s): %s", fname, exc)
 
 
 @asynccontextmanager

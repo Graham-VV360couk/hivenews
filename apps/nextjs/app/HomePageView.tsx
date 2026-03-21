@@ -468,11 +468,187 @@ function Section({ tier, stories }: { tier: Tier; stories: Story[] }) {
   );
 }
 
+type SortMode = 'level' | 'date';
+type DateRange = 'all' | '7d' | '30d';
+
+const ALL_DOMAINS = ['ai', 'vr', 'seo', 'vibe_coding', 'cross'] as const;
+
+function applyFilters(
+  stories: Story[],
+  activeDomains: Set<string>,
+  dateRange: DateRange,
+): Story[] {
+  let out = stories;
+  if (activeDomains.size > 0) {
+    out = out.filter(s => (s.domain_tags || []).some(t => activeDomains.has(t)));
+  }
+  if (dateRange !== 'all') {
+    const days = dateRange === '7d' ? 7 : 30;
+    const cutoff = Date.now() - days * 86400000;
+    out = out.filter(s => {
+      if (!s.last_updated_at) return false;
+      return new Date(s.last_updated_at).getTime() >= cutoff;
+    });
+  }
+  return out;
+}
+
+function timeAgoStr(iso: string | null): string {
+  if (!iso) return '';
+  const diff = Date.now() - new Date(iso).getTime();
+  const d = Math.floor(diff / 86400000);
+  const h = Math.floor((diff % 86400000) / 3600000);
+  if (d > 0) return `${d}d ago`;
+  if (h > 0) return `${h}h ago`;
+  const m = Math.floor((diff % 3600000) / 60000);
+  return `${m}m ago`;
+}
+
+function ControlBar({
+  sortMode, setSortMode,
+  activeDomains, toggleDomain,
+  dateRange, setDateRange,
+  total,
+}: {
+  sortMode: SortMode; setSortMode: (m: SortMode) => void;
+  activeDomains: Set<string>; toggleDomain: (d: string) => void;
+  dateRange: DateRange; setDateRange: (r: DateRange) => void;
+  total: number;
+}) {
+  const btnBase: React.CSSProperties = {
+    fontFamily: "'Space Mono', monospace",
+    fontSize: '9px',
+    letterSpacing: '0.16em',
+    padding: '6px 14px',
+    background: 'transparent',
+    border: '1px solid #252836',
+    borderRadius: '2px',
+    cursor: 'pointer',
+    transition: 'all 0.15s ease',
+  };
+  const btnActive: React.CSSProperties = {
+    ...btnBase,
+    background: '#e8950a',
+    border: '1px solid #e8950a',
+    color: '#07080c',
+    fontWeight: 700,
+  };
+  const btnInactive: React.CSSProperties = {
+    ...btnBase,
+    color: '#4a4d62',
+  };
+
+  return (
+    <div style={{
+      display: 'flex',
+      alignItems: 'center',
+      gap: '8px',
+      flexWrap: 'wrap',
+      marginBottom: '32px',
+      paddingBottom: '24px',
+      borderBottom: '1px solid #12141f',
+    }}>
+      {/* Sort toggle */}
+      <div style={{ display: 'flex', gap: '2px', marginRight: '8px' }}>
+        <button
+          onClick={() => setSortMode('level')}
+          style={sortMode === 'level' ? btnActive : btnInactive}
+        >
+          BY LEVEL
+        </button>
+        <button
+          onClick={() => setSortMode('date')}
+          style={sortMode === 'date' ? btnActive : btnInactive}
+        >
+          BY DATE
+        </button>
+      </div>
+
+      {/* Separator */}
+      <div style={{ width: '1px', height: '20px', background: '#1e2030', margin: '0 4px' }} />
+
+      {/* Domain pills */}
+      {ALL_DOMAINS.map(d => {
+        const on = activeDomains.has(d);
+        return (
+          <button
+            key={d}
+            onClick={() => toggleDomain(d)}
+            style={{
+              fontFamily: "'Space Mono', monospace",
+              fontSize: '9px',
+              letterSpacing: '0.12em',
+              padding: '5px 10px',
+              background: on ? 'rgba(74, 158, 255, 0.1)' : 'transparent',
+              border: on ? '1px solid #4a9eff' : '1px solid #1e2030',
+              color: on ? '#4a9eff' : '#2a2d3a',
+              borderRadius: '2px',
+              cursor: 'pointer',
+              transition: 'all 0.15s ease',
+            }}
+          >
+            {DOMAIN_LABELS[d] ?? d}
+          </button>
+        );
+      })}
+
+      {/* Separator */}
+      <div style={{ width: '1px', height: '20px', background: '#1e2030', margin: '0 4px' }} />
+
+      {/* Date range */}
+      {(['all', '7d', '30d'] as DateRange[]).map(r => {
+        const labels: Record<DateRange, string> = { all: 'ALL TIME', '7d': '7 DAYS', '30d': '30 DAYS' };
+        const on = dateRange === r;
+        return (
+          <button
+            key={r}
+            onClick={() => setDateRange(r)}
+            style={on ? btnActive : btnInactive}
+          >
+            {labels[r]}
+          </button>
+        );
+      })}
+
+      {/* Story count */}
+      <span style={{
+        fontFamily: "'Space Mono', monospace",
+        fontSize: '9px',
+        color: '#252836',
+        letterSpacing: '0.1em',
+        marginLeft: 'auto',
+      }}>
+        {total} {total === 1 ? 'STORY' : 'STORIES'}
+      </span>
+    </div>
+  );
+}
+
 export function HomePageView({ stories, alerts = [] }: { stories: Story[]; alerts?: Alert[] }) {
-  const alert = stories.filter(s => getTier(s) === 'alert');
-  const confirmed = stories.filter(s => getTier(s) === 'confirmed');
-  const possible = stories.filter(s => getTier(s) === 'possible');
-  const salt = stories.filter(s => getTier(s) === 'salt');
+  const [sortMode, setSortMode] = useState<SortMode>('level');
+  const [activeDomains, setActiveDomains] = useState<Set<string>>(new Set());
+  const [dateRange, setDateRange] = useState<DateRange>('all');
+
+  const toggleDomain = (d: string) => {
+    setActiveDomains(prev => {
+      const next = new Set(prev);
+      if (next.has(d)) next.delete(d); else next.add(d);
+      return next;
+    });
+  };
+
+  const filtered = applyFilters(stories, activeDomains, dateRange);
+
+  const byDate = [...filtered].sort((a, b) => {
+    const ta = a.last_updated_at ? new Date(a.last_updated_at).getTime() : 0;
+    const tb = b.last_updated_at ? new Date(b.last_updated_at).getTime() : 0;
+    return tb - ta;
+  });
+
+  const alert = filtered.filter(s => getTier(s) === 'alert');
+  const confirmed = filtered.filter(s => getTier(s) === 'confirmed');
+  const possible = filtered.filter(s => getTier(s) === 'possible');
+  const salt = filtered.filter(s => getTier(s) === 'salt');
 
   return (
     <>
@@ -767,7 +943,13 @@ export function HomePageView({ stories, alerts = [] }: { stories: Story[]; alert
         {/* Main content */}
         <main style={{ maxWidth: '1100px', margin: '0 auto', padding: '56px 40px 80px' }}>
           <AlertsWidget alerts={alerts} />
-          {stories.length === 0 ? (
+          <ControlBar
+            sortMode={sortMode} setSortMode={setSortMode}
+            activeDomains={activeDomains} toggleDomain={toggleDomain}
+            dateRange={dateRange} setDateRange={setDateRange}
+            total={filtered.length}
+          />
+          {filtered.length === 0 ? (
             <div style={{ padding: '80px 0', textAlign: 'center' }}>
               <div style={{
                 fontFamily: "'Space Mono', monospace",
@@ -776,7 +958,7 @@ export function HomePageView({ stories, alerts = [] }: { stories: Story[]; alert
                 color: '#1e2030',
                 marginBottom: '16px',
               }}>
-                NO ACTIVE SIGNALS
+                {stories.length === 0 ? 'NO ACTIVE SIGNALS' : 'NO RESULTS — TRY DIFFERENT FILTERS'}
               </div>
               <p style={{
                 fontFamily: "'Cormorant Garamond', Georgia, serif",
@@ -785,16 +967,94 @@ export function HomePageView({ stories, alerts = [] }: { stories: Story[]; alert
                 color: '#252836',
                 margin: 0,
               }}>
-                The hive is watching. Check back soon.
+                {stories.length === 0 ? 'The hive is watching. Check back soon.' : 'Adjust your filters above.'}
               </p>
             </div>
-          ) : (
+          ) : sortMode === 'level' ? (
             <>
               <Section tier="alert" stories={alert} />
               <Section tier="confirmed" stories={confirmed} />
               <Section tier="possible" stories={possible} />
               <Section tier="salt" stories={salt} />
             </>
+          ) : (
+            /* By Date — flat list with date and tier badge */
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              {byDate.map((story, i) => {
+                const tier = getTier(story);
+                const cfg = TIER_CONFIG[tier];
+                return (
+                  <FadeCard key={story.id} delay={i * 50}>
+                    <div style={{
+                      display: 'flex',
+                      gap: '20px',
+                      background: 'linear-gradient(135deg, #0c0d14 0%, #0a0b12 100%)',
+                      border: `1px solid #191b27`,
+                      borderLeft: `3px solid ${cfg.borderColor}`,
+                      borderRadius: '4px',
+                      padding: '18px 24px',
+                    }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', flexWrap: 'wrap' }}>
+                          <span style={{
+                            fontFamily: "'Space Mono', monospace",
+                            fontSize: '9px', fontWeight: 700, letterSpacing: '0.18em',
+                            padding: '3px 8px',
+                            background: cfg.badgeBg,
+                            color: cfg.badgeText,
+                            border: `1px solid ${cfg.borderColor}`,
+                            borderRadius: '2px',
+                          }}>
+                            {cfg.label}
+                          </span>
+                          {(story.domain_tags || []).map(tag => (
+                            <span key={tag} style={{
+                              fontFamily: "'Space Mono', monospace",
+                              fontSize: '9px', letterSpacing: '0.1em',
+                              color: '#363848', padding: '2px 6px',
+                              border: '1px solid #1e2030', borderRadius: '2px',
+                            }}>
+                              {DOMAIN_LABELS[tag] ?? tag}
+                            </span>
+                          ))}
+                          {story.last_updated_at && (
+                            <span style={{
+                              fontFamily: "'Space Mono', monospace",
+                              fontSize: '9px', color: '#2a2d3a',
+                              letterSpacing: '0.08em', marginLeft: 'auto',
+                            }}>
+                              {timeAgoStr(story.last_updated_at)}
+                            </span>
+                          )}
+                        </div>
+                        <h3 style={{ margin: '0 0 6px', fontFamily: "'Cormorant Garamond', Georgia, serif", fontSize: '19px', fontWeight: 600, lineHeight: 1.3 }}>
+                          {story.url ? (
+                            <a href={story.url} target="_blank" rel="noopener noreferrer" style={{ color: '#d8dae8', textDecoration: 'none' }}>
+                              {story.name}
+                            </a>
+                          ) : (
+                            <Link href={`/stories/${story.id}`} style={{ color: '#d8dae8', textDecoration: 'none' }}>
+                              {story.name}
+                            </Link>
+                          )}
+                        </h3>
+                        <p style={{ margin: 0, fontFamily: "'Lora', Georgia, serif", fontSize: '13px', color: '#525669', lineHeight: 1.6 }}>
+                          {story.description}
+                        </p>
+                      </div>
+                      <div style={{ flexShrink: 0, textAlign: 'right', paddingTop: '2px' }}>
+                        <div style={{ fontFamily: "'Space Mono', monospace", fontSize: '26px', fontWeight: 700, color: '#e8950a', lineHeight: 1, letterSpacing: '-1px' }}>
+                          {story.confidence_score?.toFixed(1) ?? '—'}
+                        </div>
+                        <div style={{ fontFamily: "'Space Mono', monospace", fontSize: '10px', color: '#363848', marginTop: '4px' }}>
+                          {DIR_SYMBOL[story.confidence_direction] ?? ''} /10
+                        </div>
+                      </div>
+                    </div>
+                  </FadeCard>
+                );
+              })}
+            </div>
           )}
 
           {/* Deep Analysis */}

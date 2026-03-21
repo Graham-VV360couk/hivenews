@@ -62,7 +62,7 @@ async def _assess_plausibility(title: str, content: str, tier: int, domain: list
         )
         response = await _get_client().messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=256,
+            max_tokens=512,
             messages=[
                 {"role": "user", "content": prompt},
                 {"role": "assistant", "content": "{"},  # prefill forces JSON
