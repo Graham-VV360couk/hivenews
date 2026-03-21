@@ -434,8 +434,10 @@ export function HomePageView({ stories }: { stories: Story[] }) {
           justifyContent: 'space-between',
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/NewsHive_Logo.png" alt="NewsHive" style={{ height: '40px', width: 'auto' }} />
+            <a href="https://newshive.geekybee.net/" style={{ display: 'flex' }}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/NewsHive_Logo.png" alt="NewsHive" style={{ height: '40px', width: 'auto' }} />
+            </a>
             <span style={{
               fontFamily: "'Space Mono', monospace",
               fontSize: '9px',

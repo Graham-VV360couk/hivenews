@@ -1,4 +1,5 @@
 export const dynamic = 'force-dynamic';
+export const maxDuration = 300; // 5-minute max for long RSS poll streams
 // apps/nextjs/app/dashboard/api/ingest/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 

@@ -116,34 +116,40 @@ function logColor(evt: LogEvent): string {
       return '#555';
     case 'complete':     return '#22c55e';
     case 'start':        return '#F5A623';
-    case 'feed_start':   return '#888';
-    default:             return '#aaa';
+    case 'feed_start':    return '#888';
+    case 'feed_progress': return '#333';
+    default:              return '#aaa';
   }
 }
 
 function LogPrefix(evt: LogEvent): string {
   switch (evt.type) {
     case 'start':        return '●';
-    case 'feed_start':   return '›';
+    case 'feed_start':    return '›';
     case 'feed_connected': return '✓';
-    case 'feed_error':   return '✗';
-    case 'feed_done':    return '→';
-    case 'complete':     return '■';
-    default:             return ' ';
+    case 'feed_error':    return '✗';
+    case 'feed_done':     return '→';
+    case 'feed_progress': return '·';
+    case 'complete':      return '■';
+    default:              return ' ';
   }
 }
 
 function LogConsole({ logs, running }: { logs: LogEvent[]; running: boolean }) {
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const el = containerRef.current;
+    if (!el) return;
+    const pageY = window.scrollY;
+    el.scrollTop = el.scrollHeight;
+    window.scrollTo(0, pageY);
   }, [logs]);
 
   if (logs.length === 0 && !running) return null;
 
   return (
-    <div style={{
+    <div ref={containerRef} style={{
       marginTop: '14px',
       background: '#080a0d',
       border: '1px solid #1a1d27',
@@ -152,8 +158,9 @@ function LogConsole({ logs, running }: { logs: LogEvent[]; running: boolean }) {
       fontFamily: "'Consolas', 'Monaco', 'Courier New', monospace",
       fontSize: '12px',
       lineHeight: 1.7,
-      maxHeight: '400px',
+      height: '400px',
       overflowY: 'auto',
+      overflowAnchor: 'none',
     }}>
       {logs.length === 0 && running && (
         <span style={{ color: '#444' }}>Connecting…</span>
@@ -167,11 +174,8 @@ function LogConsole({ logs, running }: { logs: LogEvent[]; running: boolean }) {
         </div>
       ))}
       {running && logs.length > 0 && (
-        <div style={{ color: '#333', marginTop: '4px' }}>
-          <span style={{ animation: 'none' }}>█</span>
-        </div>
+        <div style={{ color: '#333', marginTop: '4px' }}>█</div>
       )}
-      <div ref={bottomRef} />
     </div>
   );
 }
@@ -183,8 +187,7 @@ function LogConsole({ logs, running }: { logs: LogEvent[]; running: boolean }) {
 function HealthPanel() {
   const [health, setHealth] = useState<HealthStatus | null>(null);
   const [loading, setLoading] = useState(true);
-  const [seedRunning, setSeedRunning] = useState(false);
-  const [seedResult, setSeedResult] = useState<{ inserted?: number; skipped?: number; error?: string } | null>(null);
+  const [showMaintenance, setShowMaintenance] = useState(false);
   const [namingRunning, setNamingRunning] = useState(false);
   const [namingResult, setNamingResult] = useState<{ named?: number; total_processed?: number; message?: string; error?: string } | null>(null);
   const [synthesiseRunning, setSynthesiseRunning] = useState(false);
@@ -204,19 +207,6 @@ function HealthPanel() {
   }, []);
 
   useEffect(() => { checkHealth(); }, [checkHealth]);
-
-  async function handleSeed() {
-    setSeedRunning(true);
-    setSeedResult(null);
-    const res = await fetch('/dashboard/api/ingest', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'seed' }),
-    });
-    setSeedResult(await res.json());
-    setSeedRunning(false);
-    checkHealth();
-  }
 
   async function handleNameClusters() {
     setNamingRunning(true);
@@ -253,142 +243,119 @@ function HealthPanel() {
     );
   };
 
-  // Extract source count from "ok (N sources)" string
   const dbCheck = health?.checks?.database ?? '';
   const sourceCountMatch = dbCheck.match(/\((\d+) sources?\)/);
   const sourceCount = sourceCountMatch ? parseInt(sourceCountMatch[1]) : 0;
 
   return (
-    <div style={{
-      marginBottom: '24px', padding: '16px 20px',
-      background: '#111', border: '1px solid #1e1e1e', borderRadius: '6px',
-      display: 'flex', alignItems: 'center', gap: '24px', flexWrap: 'wrap',
-    }}>
-      <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap', flex: 1 }}>
-        {loading ? (
-          <span style={{ fontSize: '12px', color: '#444' }}>Checking services…</span>
-        ) : health ? (
-          <>
-            <div style={{ display: 'flex', alignItems: 'center', fontSize: '12px' }}>
-              {dot(health.checks.database)}
-              <span style={{ color: '#555' }}>
-                Database · {sourceCount} source{sourceCount !== 1 ? 's' : ''}
-                {!health.checks.database.startsWith('ok') && (
-                  <span style={{ color: '#ef4444' }}> ({health.checks.database})</span>
-                )}
-              </span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', fontSize: '12px' }}>
-              {dot(health.checks.redis)}
-              <span style={{ color: '#555' }}>
-                Redis{!health.checks.redis.startsWith('ok') && (
-                  <span style={{ color: '#ef4444' }}> ({health.checks.redis})</span>
-                )}
-              </span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', fontSize: '12px' }}>
-              {dot(health.checks.openai_embedding)}
-              <span style={{ color: '#555' }}>
-                OpenAI Embeddings{!health.checks.openai_embedding.startsWith('ok') && (
-                  <span style={{ color: '#ef4444' }}> ({health.checks.openai_embedding})</span>
-                )}
-              </span>
-            </div>
-          </>
-        ) : (
-          <span style={{ fontSize: '12px', color: '#ef4444' }}>Python service unreachable</span>
-        )}
-      </div>
-
-      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
-        {sourceCount === 0 && !loading && health && (
-          <span style={{ fontSize: '11px', color: '#F5A623' }}>No sources — seed defaults to start</span>
-        )}
-        <button
-          onClick={handleSeed}
-          disabled={seedRunning}
-          style={{
-            padding: '6px 14px', fontSize: '12px', borderRadius: '3px',
-            background: 'none', border: '1px solid #333',
-            color: seedRunning ? '#444' : '#888',
-            cursor: seedRunning ? 'not-allowed' : 'pointer',
-          }}
-        >
-          {seedRunning ? 'Seeding…' : 'Seed Default Sources'}
-        </button>
-        <button
-          onClick={handleNameClusters}
-          disabled={namingRunning}
-          style={{
-            padding: '6px 14px', fontSize: '12px', borderRadius: '3px',
-            background: 'none', border: '1px solid #333',
-            color: namingRunning ? '#444' : '#888',
-            cursor: namingRunning ? 'not-allowed' : 'pointer',
-          }}
-        >
-          {namingRunning ? 'Naming…' : 'Name Clusters'}
-        </button>
-        <button
-          onClick={handleSynthesiseNarratives}
-          disabled={synthesiseRunning}
-          style={{
-            padding: '6px 14px', fontSize: '12px', borderRadius: '3px',
-            background: 'none', border: '1px solid #333',
-            color: synthesiseRunning ? '#444' : '#888',
-            cursor: synthesiseRunning ? 'not-allowed' : 'pointer',
-          }}
-        >
-          {synthesiseRunning ? 'Synthesising…' : 'Synthesise Stories'}
-        </button>
-        <button
-          onClick={checkHealth}
-          disabled={loading}
-          style={{
-            padding: '6px 10px', fontSize: '11px', borderRadius: '3px',
-            background: 'none', border: '1px solid #222',
-            color: '#444', cursor: 'pointer',
-          }}
-        >
-          ↻
-        </button>
-      </div>
-
-      {namingResult && (
-        <div style={{ width: '100%', fontSize: '12px', marginTop: '4px' }}>
-          {namingResult.error ? (
-            <span style={{ color: '#ef4444' }}>Error: {namingResult.error}</span>
-          ) : namingResult.message ? (
-            <span style={{ color: '#555' }}>{namingResult.message}</span>
+    <div style={{ marginBottom: '24px' }}>
+      {/* Status bar */}
+      <div style={{
+        padding: '16px 20px',
+        background: '#111', border: '1px solid #1e1e1e', borderRadius: '6px',
+        display: 'flex', alignItems: 'center', gap: '24px', flexWrap: 'wrap',
+      }}>
+        <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap', flex: 1 }}>
+          {loading ? (
+            <span style={{ fontSize: '12px', color: '#444' }}>Checking services…</span>
+          ) : health ? (
+            <>
+              <div style={{ display: 'flex', alignItems: 'center', fontSize: '12px' }}>
+                {dot(health.checks.database)}
+                <span style={{ color: '#555' }}>
+                  Database · {sourceCount} source{sourceCount !== 1 ? 's' : ''}
+                  {!health.checks.database.startsWith('ok') && (
+                    <span style={{ color: '#ef4444' }}> ({health.checks.database})</span>
+                  )}
+                </span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', fontSize: '12px' }}>
+                {dot(health.checks.redis)}
+                <span style={{ color: '#555' }}>
+                  Redis{!health.checks.redis.startsWith('ok') && (
+                    <span style={{ color: '#ef4444' }}> ({health.checks.redis})</span>
+                  )}
+                </span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', fontSize: '12px' }}>
+                {dot(health.checks.openai_embedding)}
+                <span style={{ color: '#555' }}>
+                  OpenAI{!health.checks.openai_embedding.startsWith('ok') && (
+                    <span style={{ color: '#ef4444' }}> ({health.checks.openai_embedding})</span>
+                  )}
+                </span>
+              </div>
+            </>
           ) : (
-            <span style={{ color: '#22c55e' }}>
-              Named {namingResult.named} cluster{namingResult.named !== 1 ? 's' : ''}
-              {(namingResult.total_processed ?? 0) > 0 && ` (processed ${namingResult.total_processed})`}
-            </span>
+            <span style={{ fontSize: '12px', color: '#ef4444' }}>Python service unreachable</span>
           )}
         </div>
-      )}
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button
+            onClick={() => setShowMaintenance(v => !v)}
+            style={{
+              padding: '5px 12px', fontSize: '11px', borderRadius: '3px',
+              background: 'none', border: '1px solid #222', color: '#444', cursor: 'pointer',
+            }}
+          >
+            {showMaintenance ? 'Hide maintenance' : 'Maintenance'}
+          </button>
+          <button
+            onClick={checkHealth}
+            disabled={loading}
+            style={{
+              padding: '5px 10px', fontSize: '11px', borderRadius: '3px',
+              background: 'none', border: '1px solid #222', color: '#444', cursor: 'pointer',
+            }}
+          >
+            ↻
+          </button>
+        </div>
+      </div>
 
-      {synthesiseResult && (
-        <div style={{ width: '100%', fontSize: '12px', marginTop: '4px' }}>
-          {synthesiseResult.error ? (
-            <span style={{ color: '#ef4444' }}>Error: {synthesiseResult.error}</span>
-          ) : (
-            <span style={{ color: '#22c55e' }}>
-              Synthesised {synthesiseResult.synthesised} stor{synthesiseResult.synthesised !== 1 ? 'ies' : 'y'}
-              {(synthesiseResult.total_processed ?? 0) > 0 && ` (processed ${synthesiseResult.total_processed})`}
+      {/* Maintenance panel — collapsed by default */}
+      {showMaintenance && (
+        <div style={{
+          marginTop: '8px', padding: '14px 20px',
+          background: '#0d0d0d', border: '1px solid #1a1a1a', borderRadius: '6px',
+          display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap',
+        }}>
+          <span style={{ fontSize: '11px', color: '#333', marginRight: '4px' }}>MAINTENANCE</span>
+          <button
+            onClick={handleNameClusters}
+            disabled={namingRunning}
+            style={{
+              padding: '5px 12px', fontSize: '12px', borderRadius: '3px',
+              background: 'none', border: '1px solid #2a2a2a',
+              color: namingRunning ? '#333' : '#666',
+              cursor: namingRunning ? 'not-allowed' : 'pointer',
+            }}
+          >
+            {namingRunning ? 'Naming…' : 'Name Clusters'}
+          </button>
+          <button
+            onClick={handleSynthesiseNarratives}
+            disabled={synthesiseRunning}
+            style={{
+              padding: '5px 12px', fontSize: '12px', borderRadius: '3px',
+              background: 'none', border: '1px solid #2a2a2a',
+              color: synthesiseRunning ? '#333' : '#666',
+              cursor: synthesiseRunning ? 'not-allowed' : 'pointer',
+            }}
+          >
+            {synthesiseRunning ? 'Synthesising…' : 'Synthesise Stories'}
+          </button>
+          {namingResult && (
+            <span style={{ fontSize: '12px', color: namingResult.error ? '#ef4444' : '#22c55e' }}>
+              {namingResult.error ? `Error: ${namingResult.error}` :
+               namingResult.message ? namingResult.message :
+               `Named ${namingResult.named} cluster${namingResult.named !== 1 ? 's' : ''}`}
             </span>
           )}
-        </div>
-      )}
-
-      {seedResult && (
-        <div style={{ width: '100%', fontSize: '12px', marginTop: '4px' }}>
-          {seedResult.error ? (
-            <span style={{ color: '#ef4444' }}>Error: {seedResult.error}</span>
-          ) : (
-            <span style={{ color: '#22c55e' }}>
-              Seeded {seedResult.inserted} source{seedResult.inserted !== 1 ? 's' : ''}
-              {(seedResult.skipped ?? 0) > 0 && ` · ${seedResult.skipped} already existed`}
+          {synthesiseResult && (
+            <span style={{ fontSize: '12px', color: synthesiseResult.error ? '#ef4444' : '#22c55e' }}>
+              {synthesiseResult.error ? `Error: ${synthesiseResult.error}` :
+               `Synthesised ${synthesiseResult.synthesised} stor${synthesiseResult.synthesised !== 1 ? 'ies' : 'y'}`}
             </span>
           )}
         </div>

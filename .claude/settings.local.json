@@ -26,7 +26,18 @@
       "Bash(python3 -c \":*)",
       "Bash(find /c/xampp/htdocs/hivenews -name *.sql)",
       "mcp__plugin_playwright_playwright__browser_select_option",
-      "Bash(xargs grep:*)"
+      "Bash(xargs grep:*)",
+      "Bash(for f:*)",
+      "Bash(do echo:*)",
+      "Read(//c/xampp/htdocs/hivenews/**)",
+      "Bash(done)",
+      "Bash(python3 -c \"import json,sys; data=json.load\\(sys.stdin\\); text=data[0][''''text'''']; lines=text.split\\(''''\\\\n''''\\); [print\\(l\\) for l in lines[-60:]]\")",
+      "mcp__plugin_playwright_playwright__browser_take_screenshot",
+      "Bash(node -e \"const bcrypt = require\\(''bcryptjs''\\); bcrypt.compare\\(''M1n@Taur152!'', ''$2b$12$4YopufIUPX.gZQt5zGQLluv5msG0HdH.83jYFSbwkb8vl9ZAk.eq2''\\).then\\(r => console.log\\(''match:'', r\\)\\);\")",
+      "Bash(node -e \"const bcrypt = require\\(''bcrypt''\\); bcrypt.compare\\(''M1n@Taur152!'', ''$2b$12$4YopufIUPX.gZQt5zGQLluv5msG0HdH.83jYFSbwkb8vl9ZAk.eq2''\\).then\\(r => console.log\\(''match:'', r\\)\\);\")",
+      "Bash(node -e \"const bcrypt = require\\(''bcryptjs''\\); bcrypt.hash\\(''M1n@Taur152!'', 12\\).then\\(h => console.log\\(h\\)\\);\")",
+      "Bash(grep -r \"confidence_level\\\\|draft_data\" C:/xampp/htdocs/hivenews/apps/nextjs/app --include=*.ts --include=*.tsx)",
+      "Bash(git init:*)"
     ]
   }
 }

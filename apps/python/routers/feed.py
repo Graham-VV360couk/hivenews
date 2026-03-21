@@ -8,6 +8,7 @@ POST /feed/backfill/reddit — backfill Reddit posts via public JSON API
 import asyncio
 import json
 import logging
+import os
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone, timedelta
 from uuid import UUID
@@ -35,6 +36,19 @@ from services.scoring import ALERT_CANDIDATE_THRESHOLD, apply_scores_to_signal, 
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/feed", tags=["feed"])
+
+
+def _mem_mb() -> str:
+    """Return current RSS memory usage in MB (Linux only, safe to call anywhere)."""
+    try:
+        with open("/proc/self/status") as f:
+            for line in f:
+                if line.startswith("VmRSS:"):
+                    kb = int(line.split()[1])
+                    return f"{kb // 1024}MB"
+    except Exception:
+        pass
+    return "?"
 
 # Thread pool for running blocking feedparser calls without freezing the event loop
 _thread_pool = ThreadPoolExecutor(max_workers=4)
@@ -159,18 +173,33 @@ async def run_pipeline(
 # RSS poll
 # ---------------------------------------------------------------------------
 
+# Max new items per feed per poll run.
+# First-time poll (no last_ingested): higher cap — accept the upfront cost.
+# Subsequent polls: lower cap — feeds typically have <20 new items/day.
+_MAX_NEW_FIRST_RUN = 100
+_MAX_NEW_PER_FEED  = 30
+
+
 @router.post("/poll")
 async def poll_rss_sources() -> dict:
     """Fetch all active RSS sources and ingest any new items found in the feed."""
     async with get_conn() as conn:
         sources = await conn.fetch(
-            "SELECT id, name, url, domain_tags FROM sources WHERE platform = 'rss' AND is_active = TRUE AND url IS NOT NULL"
+            "SELECT id, name, url, domain_tags, last_ingested FROM sources "
+            "WHERE platform = 'rss' AND is_active = TRUE AND url IS NOT NULL"
         )
 
     ingested = skipped = errors = 0
 
     async with httpx.AsyncClient(timeout=20) as client:
         for source in sources:
+            last_ingested = source["last_ingested"]
+            cutoff: datetime | None = None
+            if last_ingested:
+                if last_ingested.tzinfo is None:
+                    last_ingested = last_ingested.replace(tzinfo=timezone.utc)
+                cutoff = last_ingested - timedelta(hours=1)
+
             try:
                 resp = await client.get(source["url"], follow_redirects=True)
                 feed = await _parse_feed(resp.text)
@@ -179,9 +208,24 @@ async def poll_rss_sources() -> dict:
                 errors += 1
                 continue
 
+            cap = _MAX_NEW_FIRST_RUN if not source["last_ingested"] else _MAX_NEW_PER_FEED
+            new_count = 0
             for entry in feed.entries:
+                if new_count >= cap:
+                    break
+
                 url = entry.get("link", "")
                 if not url:
+                    continue
+
+                published_at = None
+                if pt := entry.get("published_parsed"):
+                    try:
+                        published_at = datetime(*pt[:6], tzinfo=timezone.utc)
+                    except Exception:
+                        pass
+
+                if cutoff and published_at and published_at < cutoff:
                     continue
 
                 title = entry.get("title", "")
@@ -189,14 +233,6 @@ async def poll_rss_sources() -> dict:
                     entry.get("summary", "")
                     or entry.get("content", [{}])[0].get("value", "")
                 )
-
-                # Parse published date
-                published_at = None
-                if pt := entry.get("published_parsed"):
-                    try:
-                        published_at = datetime(*pt[:6], tzinfo=timezone.utc)
-                    except Exception:
-                        pass
 
                 result = await run_pipeline(
                     source_id=source["id"],
@@ -209,10 +245,12 @@ async def poll_rss_sources() -> dict:
                 )
                 if result == "ingested":
                     ingested += 1
+                    new_count += 1
                 elif result == "duplicate":
                     skipped += 1
                 else:
                     errors += 1
+                    new_count += 1
 
             # Update last_ingested
             async with get_conn() as conn:
@@ -245,7 +283,7 @@ async def poll_rss_stream() -> StreamingResponse:
 
         async with get_conn() as conn:
             sources = await conn.fetch(
-                "SELECT id, name, url, domain_tags "
+                "SELECT id, name, url, domain_tags, last_ingested "
                 "FROM sources "
                 "WHERE platform = 'rss' AND is_active = TRUE AND url IS NOT NULL "
                 "ORDER BY name"
@@ -261,96 +299,199 @@ async def poll_rss_stream() -> StreamingResponse:
                 name = source["name"]
                 url  = source["url"]
                 domain_tags = list(source["domain_tags"] or [])
+                last_ingested = source["last_ingested"]  # datetime | None
 
                 yield evt({"type": "feed_start", "name": name, "url": url,
                            "msg": f"Connecting to {name}…"})
 
-                # Fetch the feed
                 try:
-                    resp = await client.get(url, follow_redirects=True)
-                    resp.raise_for_status()
-                except Exception as exc:
-                    err = str(exc)
-                    yield evt({"type": "feed_error", "name": name,
-                               "msg": f"  ✗ Failed to fetch: {err}"})
-                    total_errors += 1
-                    continue
+                    # --- Fetch (streaming, hard 3MB cap) ---
+                    # Large feeds (e.g. HuggingFace 750 items) can be 15-20MB
+                    # raw. Buffering with client.get() OOMs the container.
+                    # Stream and stop at 3MB. Breaking early may raise
+                    # CancelledError during httpx cleanup — catch BaseException
+                    # so it doesn't silently kill the generator.
+                    _MAX_FEED_BYTES = 3 * 1024 * 1024
+                    fetch_error = None
+                    chunks: list[bytes] = []
+                    try:
+                        async with client.stream("GET", url, follow_redirects=True) as resp:
+                            if resp.status_code >= 400:
+                                fetch_error = f"HTTP {resp.status_code}"
+                            else:
+                                total_bytes = 0
+                                async for chunk in resp.aiter_bytes(65536):
+                                    chunks.append(chunk)
+                                    total_bytes += len(chunk)
+                                    if total_bytes >= _MAX_FEED_BYTES:
+                                        log.warning("Feed %s: capped at 3MB", name)
+                                        break
+                    except BaseException as exc:
+                        if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                            raise
+                        if not chunks:
+                            # Nothing downloaded at all — real error
+                            fetch_error = str(exc)
+                        else:
+                            # Got data but cleanup raised (e.g. CancelledError
+                            # from early break) — log and proceed with what we have
+                            log.warning("Feed %s stream close: %s (proceeding with %dKB)",
+                                        name, exc, sum(len(c) for c in chunks) // 1024)
 
-                try:
-                    feed = await _parse_feed(resp.text)
-                except Exception as exc:
-                    yield evt({"type": "feed_error", "name": name,
-                               "msg": f"  ✗ Failed to parse feed: {exc}"})
-                    total_errors += 1
-                    continue
-
-                entry_count = len(feed.entries)
-                feed_title  = feed.feed.get("title", name)
-                yield evt({"type": "feed_connected", "name": name,
-                           "feed_title": feed_title, "entry_count": entry_count,
-                           "msg": f"  ✓ Connected — \"{feed_title}\" — {entry_count} item(s) in feed"})
-
-                ingested = skipped = errors = 0
-
-                for entry in feed.entries:
-                    url_item = entry.get("link", "")
-                    if not url_item:
-                        errors += 1
+                    if fetch_error:
+                        yield evt({"type": "feed_error", "name": name,
+                                   "msg": f"  ✗ Failed to fetch: {fetch_error}"})
+                        total_errors += 1
                         continue
 
-                    title   = entry.get("title", "")
-                    content = (
-                        entry.get("summary", "")
-                        or (entry.get("content") or [{}])[0].get("value", "")
-                    )
+                    feed_text = b"".join(chunks).decode("utf-8", errors="replace")
+                    log.info("[%s] mem=%s fetched %dKB (%d chunks)",
+                             name, _mem_mb(), len(feed_text) // 1024, len(chunks))
 
-                    published_at = None
-                    if pt := entry.get("published_parsed"):
+                    # --- Parse ---
+                    try:
+                        feed = await _parse_feed(feed_text)
+                    except Exception as exc:
+                        yield evt({"type": "feed_error", "name": name,
+                                   "msg": f"  ✗ Failed to parse feed: {exc}"})
+                        total_errors += 1
+                        continue
+
+                    entry_count = len(feed.entries)
+                    feed_title  = feed.feed.get("title", name)
+                    log.info("[%s] mem=%s parsed %d entries", name, _mem_mb(), entry_count)
+
+                    # Build cutoff: skip entries older than last_ingested
+                    # (with 1hr overlap to avoid missing late-arriving items)
+                    cutoff: datetime | None = None
+                    if last_ingested:
+                        li = last_ingested
+                        if li.tzinfo is None:
+                            li = li.replace(tzinfo=timezone.utc)
+                        cutoff = li - timedelta(hours=1)
+
+                    # Pre-filter to candidates newer than cutoff.
+                    # RSS feeds are newest-first, so we only need to scan the
+                    # first MAX_SCAN entries — no value in looking at entry 500+
+                    # of a 750-item feed.
+                    MAX_SCAN = 150
+                    candidates = []
+                    for entry in feed.entries[:MAX_SCAN]:
+                        url_item = entry.get("link", "")
+                        if not url_item:
+                            continue
+                        published_at = None
+                        if pt := entry.get("published_parsed"):
+                            try:
+                                published_at = datetime(*pt[:6], tzinfo=timezone.utc)
+                            except Exception:
+                                pass
+                        if cutoff and published_at and published_at < cutoff:
+                            continue
+                        candidates.append((url_item, entry, published_at))
+
+                    new_count = len(candidates)
+                    cap = _MAX_NEW_FIRST_RUN if not last_ingested else _MAX_NEW_PER_FEED
+                    log.info("[%s] mem=%s %d candidates (cap=%d, cutoff=%s)",
+                             name, _mem_mb(), new_count, cap,
+                             cutoff.isoformat() if cutoff else "none")
+                    yield evt({"type": "feed_connected", "name": name,
+                               "feed_title": feed_title, "entry_count": entry_count,
+                               "new_count": new_count,
+                               "msg": f"  ✓ Connected — \"{feed_title}\" — {entry_count} item(s), {new_count} new since last poll"})
+
+                    # --- Process ---
+                    ingested = skipped = errors = 0
+                    batch = candidates[:cap]
+
+                    for idx, (url_item, entry, published_at) in enumerate(batch):
+                        # Keepalive BEFORE each item — guarantees the SSE
+                        # connection never goes silent for longer than one
+                        # item's processing timeout (30s)
+                        yield evt({
+                            "type": "feed_progress",
+                            "name": name,
+                            "processed": idx,
+                            "total": len(batch),
+                            "ingested": ingested,
+                            "msg": f"  … {idx + 1}/{len(batch)}",
+                        })
+
+                        title   = entry.get("title", "")
+                        content = (
+                            entry.get("summary", "")
+                            or (entry.get("content") or [{}])[0].get("value", "")
+                        )
+                        log.info("[%s] item %d/%d mem=%s url=%.80s",
+                                 name, idx + 1, len(batch), _mem_mb(), url_item)
                         try:
-                            published_at = datetime(*pt[:6], tzinfo=timezone.utc)
-                        except Exception:
-                            pass
+                            result = await asyncio.wait_for(
+                                run_pipeline(
+                                    source_id=source["id"],
+                                    title=title,
+                                    content=content,
+                                    url=url_item,
+                                    published_at=published_at,
+                                    domain_tags=domain_tags,
+                                    source_type="rss",
+                                ),
+                                timeout=30,
+                            )
+                        except asyncio.TimeoutError:
+                            log.warning("Pipeline timeout for %s", url_item)
+                            result = "error"
+                        except Exception as exc:
+                            log.warning("Pipeline exception for %s: %s", url_item, exc)
+                            result = "error"
 
-                    result = await run_pipeline(
-                        source_id=source["id"],
-                        title=title,
-                        content=content,
-                        url=url_item,
-                        published_at=published_at,
-                        domain_tags=domain_tags,
-                        source_type="rss",
-                    )
-                    if result == "ingested":
-                        ingested += 1
-                    elif result == "duplicate":
-                        skipped += 1
-                    else:
-                        errors += 1
+                        if result == "ingested":
+                            ingested += 1
+                        elif result == "duplicate":
+                            skipped += 1
+                        else:
+                            errors += 1
 
-                total_ingested += ingested
-                total_skipped  += skipped
-                total_errors   += errors
+                        # Yield control back to the event loop between items.
+                        # Prevents rate-limit pile-ups and keeps the SSE
+                        # stream flushed.
+                        await asyncio.sleep(0)
 
-                parts = [f"ingested {ingested}"]
-                if skipped:
-                    parts.append(f"{skipped} duplicate(s) skipped")
-                if errors:
-                    parts.append(f"{errors} error(s)")
-                yield evt({
-                    "type": "feed_done",
-                    "name": name,
-                    "ingested": ingested,
-                    "skipped": skipped,
-                    "errors": errors,
-                    "msg": f"  → {', '.join(parts)}",
-                })
+                    log.info("[%s] mem=%s done — ingested=%d skipped=%d errors=%d",
+                             name, _mem_mb(), ingested, skipped, errors)
+                    capped = max(0, new_count - cap)
+                    total_ingested += ingested
+                    total_skipped  += skipped
+                    total_errors   += errors
 
-                # Update last_ingested timestamp
-                async with get_conn() as conn:
-                    await conn.execute(
-                        "UPDATE sources SET last_ingested = NOW() WHERE id = $1",
-                        source["id"]
-                    )
+                    parts = [f"ingested {ingested}"]
+                    if skipped:
+                        parts.append(f"{skipped} duplicate(s) skipped")
+                    if errors:
+                        parts.append(f"{errors} error(s)")
+                    if capped:
+                        parts.append(f"{capped} deferred to next poll")
+                    yield evt({
+                        "type": "feed_done",
+                        "name": name,
+                        "ingested": ingested,
+                        "skipped": skipped,
+                        "errors": errors,
+                        "capped": capped,
+                        "msg": f"  → {', '.join(parts)}",
+                    })
+
+                    # Update last_ingested timestamp
+                    async with get_conn() as conn:
+                        await conn.execute(
+                            "UPDATE sources SET last_ingested = NOW() WHERE id = $1",
+                            source["id"]
+                        )
+
+                except Exception as exc:
+                    log.error("Unhandled error processing feed %s: %s", name, exc)
+                    yield evt({"type": "feed_error", "name": name,
+                               "msg": f"  ✗ Unexpected error: {exc}"})
+                    total_errors += 1
 
         yield evt({
             "type": "complete",
@@ -893,7 +1034,7 @@ _DEFAULT_SOURCES = [
     # AI
     {"name": "ArXiv CS.AI", "url": "https://rss.arxiv.org/rss/cs.AI", "platform": "rss", "domain_tags": ["ai"], "tier": 1},
     {"name": "OpenAI Blog", "url": "https://openai.com/blog/rss/", "platform": "rss", "domain_tags": ["ai"], "tier": 1},
-    {"name": "Anthropic News", "url": "https://www.anthropic.com/news/rss", "platform": "rss", "domain_tags": ["ai"], "tier": 1},
+    {"name": "Anthropic News", "url": "https://www.anthropic.com/rss.xml", "platform": "rss", "domain_tags": ["ai"], "tier": 1},
     {"name": "Google DeepMind Blog", "url": "https://deepmind.google/blog/rss.xml", "platform": "rss", "domain_tags": ["ai"], "tier": 1},
     {"name": "Hugging Face Blog", "url": "https://huggingface.co/blog/feed.xml", "platform": "rss", "domain_tags": ["ai"], "tier": 2},
     {"name": "MIT News — AI", "url": "https://news.mit.edu/rss/topic/artificial-intelligence2", "platform": "rss", "domain_tags": ["ai"], "tier": 1},
@@ -910,7 +1051,7 @@ _DEFAULT_SOURCES = [
     {"name": "Search Engine Journal", "url": "https://www.searchenginejournal.com/feed/", "platform": "rss", "domain_tags": ["seo"], "tier": 1},
     {"name": "Moz Blog", "url": "https://moz.com/blog/feed", "platform": "rss", "domain_tags": ["seo"], "tier": 2},
     {"name": "Ahrefs Blog", "url": "https://ahrefs.com/blog/feed/", "platform": "rss", "domain_tags": ["seo"], "tier": 2},
-    {"name": "Google Search Central Blog", "url": "https://developers.google.com/search/blog/feeds/blog_posts.xml", "platform": "rss", "domain_tags": ["seo"], "tier": 1},
+    {"name": "Google Search Central Blog", "url": "https://developers.google.com/search/blog/atom.xml", "platform": "rss", "domain_tags": ["seo"], "tier": 1},
     # Vibe Coding
     {"name": "Dev.to", "url": "https://dev.to/feed", "platform": "rss", "domain_tags": ["vibe_coding"], "tier": 2},
     {"name": "Hacker News Best (RSS)", "url": "https://news.ycombinator.com/rss", "platform": "rss", "domain_tags": ["ai", "vibe_coding"], "tier": 1},

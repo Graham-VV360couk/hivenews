@@ -54,20 +54,28 @@ Return JSON only:
 
 async def _assess_plausibility(title: str, content: str, tier: int, domain: list[str]) -> dict:
     try:
-        response = await _get_client().messages.create(
-            model="claude-opus-4-6",
-            max_tokens=256,
-            messages=[{"role": "user", "content": _PLAUSIBILITY_PROMPT.format(
-                title=title or "",
-                content=(content or "")[:1000],
-                tier=tier,
-                domain=", ".join(domain),
-            )}],
+        prompt = _PLAUSIBILITY_PROMPT.format(
+            title=(title or "").replace("{", "{{").replace("}", "}}"),
+            content=(content or "")[:1000].replace("{", "{{").replace("}", "}}"),
+            tier=tier,
+            domain=", ".join(domain),
         )
-        return json.loads(response.content[0].text.strip())
+        response = await _get_client().messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=256,
+            messages=[
+                {"role": "user", "content": prompt},
+                {"role": "assistant", "content": "{"},  # prefill forces JSON
+            ],
+        )
+        tail = response.content[0].text.strip() if response.content else ""
+        if not tail:
+            log.debug("Plausibility: empty response (stop_reason=%s)", response.stop_reason)
+            return {"plausible": True, "score": 0.5, "concerns": ["empty model response"]}
+        raw = "{" + tail
+        return json.loads(raw)
     except Exception as exc:
         log.warning("Plausibility check failed: %s", exc)
-        # Default to plausible on error — don't suppress alerts due to API issues
         return {"plausible": True, "score": 0.5, "concerns": ["plausibility check failed"]}
 
 

@@ -99,10 +99,10 @@ export default async function StoryPage({ params }: { params: { id: string } }) 
 
       {/* Top bar */}
       <div style={{ borderBottom: '1px solid #12141f', padding: '0 40px', height: '56px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(7,8,12,0.95)', backdropFilter: 'blur(12px)', position: 'sticky', top: 0, zIndex: 100 }}>
-        <Link href="/" style={{ textDecoration: 'none' }}>
+        <a href="https://newshive.geekybee.net/" style={{ textDecoration: 'none' }}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/NewsHive_Logo.png" alt="NewsHive" style={{ height: '28px', width: 'auto' }} />
-        </Link>
+        </a>
         <Link href="/dashboard" style={{ fontSize: '12px', color: '#444', textDecoration: 'none', fontFamily: 'Space Mono, monospace', letterSpacing: '0.05em' }}>
           ANALYST PORTAL →
         </Link>

@@ -18,10 +18,14 @@ def _get_client() -> AsyncOpenAI:
 
 async def generate_embedding(text: str) -> list[float]:
     """Generate a 1536-dim embedding for the given text."""
+    import asyncio
     truncated = text[:_MAX_CHARS] if len(text) > _MAX_CHARS else text
-    response = await _get_client().embeddings.create(
-        model=_MODEL,
-        input=truncated,
-        dimensions=1536,
+    response = await asyncio.wait_for(
+        _get_client().embeddings.create(
+            model=_MODEL,
+            input=truncated,
+            dimensions=1536,
+        ),
+        timeout=20,
     )
     return response.data[0].embedding

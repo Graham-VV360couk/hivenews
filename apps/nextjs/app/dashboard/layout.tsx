@@ -25,8 +25,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         flexShrink: 0,
       }}>
         <div style={{ padding: '16px 20px 20px', borderBottom: '1px solid #2a2a2a' }}>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/NewsHive_Logo.png" alt="NewsHive" style={{ height: '36px', width: 'auto', display: 'block' }} />
+          <a href="https://newshive.geekybee.net/" style={{ display: 'block' }}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/NewsHive_Logo.png" alt="NewsHive" style={{ height: '36px', width: 'auto', display: 'block' }} />
+          </a>
         </div>
         <ul style={{ listStyle: 'none', margin: '16px 0 0', padding: 0 }}>
           {NAV_ITEMS.map(item => (
