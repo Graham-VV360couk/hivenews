@@ -46,6 +46,16 @@ export async function POST(req: NextRequest) {
     const tags = Array.isArray(domain_tags) ? domain_tags : [];
     const tierNum = parseInt(tier) || 3;
 
+    if (url) {
+      const existing = await sql`SELECT id, name FROM sources WHERE url = ${url} LIMIT 1`;
+      if (existing.length > 0) {
+        return NextResponse.json(
+          { error: `A source with this URL already exists: "${existing[0].name}"` },
+          { status: 409 }
+        );
+      }
+    }
+
     const rows = await sql`
       INSERT INTO sources (name, handle, url, platform, domain_tags, tier)
       VALUES (${name}, ${handle || null}, ${url || null}, ${platform}, ${tags}, ${tierNum})

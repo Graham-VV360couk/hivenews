@@ -7,11 +7,23 @@ log = logging.getLogger(__name__)
 _MAX_ALERTS_PER_DOMAIN_PER_WEEK = 2
 
 
+def _effective_corroboration(corroboration_count: int, source_tier: int) -> int:
+    """Tier-1 sources (official feeds) are authoritative primary sources.
+    Google's blog reporting on Google IS the source of truth — it doesn't need
+    third-party confirmation to be credible. We credit tier-1 sources with a
+    base corroboration of 2, so they qualify as significant on their own and
+    reach 'confirmed' with just one additional source."""
+    if source_tier <= 1:
+        return max(corroboration_count, 2)
+    return corroboration_count
+
+
 def classify_alert_tier(composite: float, corroboration_count: int, source_tier: int) -> str | None:
     """Return alert tier or None if composite doesn't meet threshold."""
-    if composite >= 9.0 and corroboration_count >= 3 and source_tier <= 2:
+    ec = _effective_corroboration(corroboration_count, source_tier)
+    if composite >= 9.0 and ec >= 3 and source_tier <= 2:
         return "breaking"
-    if composite >= 8.5 and corroboration_count >= 2:
+    if composite >= 8.5 and ec >= 2:
         return "significant"
     if composite >= 8.0:
         return "watch"
@@ -27,9 +39,10 @@ def route_confidence(
     """Map alert tier + context to confidence label."""
     if too_good_to_be_true:
         return "pinch_of_salt"
-    if alert_tier == "breaking" and corroboration_count >= 3 and source_tier <= 1:
+    ec = _effective_corroboration(corroboration_count, source_tier)
+    if alert_tier == "breaking" and ec >= 3 and source_tier <= 1:
         return "confirmed"
-    if alert_tier in ("breaking", "significant") and corroboration_count >= 2:
+    if alert_tier in ("breaking", "significant") and ec >= 2:
         return "developing"
     return "pinch_of_salt"
 

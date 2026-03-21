@@ -200,17 +200,45 @@ async def poll_rss_sources() -> dict:
                     last_ingested = last_ingested.replace(tzinfo=timezone.utc)
                 cutoff = last_ingested - timedelta(hours=1)
 
+            # Streaming fetch with 3MB cap (same as poll-stream) to avoid OOM
+            _MAX_FEED_BYTES = 3 * 1024 * 1024
+            fetch_error = None
+            chunks: list[bytes] = []
             try:
-                resp = await client.get(source["url"], follow_redirects=True)
-                feed = await _parse_feed(resp.text)
+                async with client.stream("GET", source["url"], follow_redirects=True) as resp:
+                    if resp.status_code >= 400:
+                        fetch_error = f"HTTP {resp.status_code}"
+                    else:
+                        total_bytes = 0
+                        async for chunk in resp.aiter_bytes(65536):
+                            chunks.append(chunk)
+                            total_bytes += len(chunk)
+                            if total_bytes >= _MAX_FEED_BYTES:
+                                log.warning("Feed %s: capped at 3MB", source["name"])
+                                break
+            except BaseException as exc:
+                if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                    raise
+                if not chunks:
+                    fetch_error = str(exc)
+                else:
+                    log.warning("Feed %s stream close: %s (proceeding)", source["name"], exc)
+
+            if fetch_error:
+                log.warning("Failed to fetch feed %s: %s", source["url"], fetch_error)
+                errors += 1
+                continue
+
+            try:
+                feed = await _parse_feed(b"".join(chunks).decode("utf-8", errors="replace"))
             except Exception as exc:
-                log.warning("Failed to fetch feed %s: %s", source["url"], exc)
+                log.warning("Failed to parse feed %s: %s", source["url"], exc)
                 errors += 1
                 continue
 
             cap = _MAX_NEW_FIRST_RUN if not source["last_ingested"] else _MAX_NEW_PER_FEED
             new_count = 0
-            for entry in feed.entries:
+            for entry in feed.entries[:150]:
                 if new_count >= cap:
                     break
 
@@ -231,7 +259,7 @@ async def poll_rss_sources() -> dict:
                 title = entry.get("title", "")
                 content = (
                     entry.get("summary", "")
-                    or entry.get("content", [{}])[0].get("value", "")
+                    or (entry.get("content") or [{}])[0].get("value", "")
                 )
 
                 result = await run_pipeline(
@@ -1023,6 +1051,19 @@ async def feed_health() -> dict:
 
     all_ok = all(v.startswith("ok") for v in checks.values())
     return {"status": "ok" if all_ok else "degraded", "checks": checks}
+
+
+# ---------------------------------------------------------------------------
+# X / Twitter poll — placeholder until API credentials are configured
+# ---------------------------------------------------------------------------
+
+async def poll_x_sources() -> dict:
+    """
+    Poll active X / Twitter sources.
+    Not yet implemented — raises NotImplementedError until X API credentials
+    are configured and the poller is built out.
+    """
+    raise NotImplementedError("X polling not yet configured")
 
 
 # ---------------------------------------------------------------------------

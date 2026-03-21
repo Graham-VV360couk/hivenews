@@ -37,6 +37,8 @@ async def lifespan(app: FastAPI):
     await init_pool()
     await init_redis()
     await _run_migrations()
+    from services.scheduler import start_scheduler
+    start_scheduler()
     yield
     await close_pool()
     await close_redis()

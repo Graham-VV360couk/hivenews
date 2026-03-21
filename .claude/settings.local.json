@@ -37,7 +37,8 @@
       "Bash(node -e \"const bcrypt = require\\(''bcrypt''\\); bcrypt.compare\\(''M1n@Taur152!'', ''$2b$12$4YopufIUPX.gZQt5zGQLluv5msG0HdH.83jYFSbwkb8vl9ZAk.eq2''\\).then\\(r => console.log\\(''match:'', r\\)\\);\")",
       "Bash(node -e \"const bcrypt = require\\(''bcryptjs''\\); bcrypt.hash\\(''M1n@Taur152!'', 12\\).then\\(h => console.log\\(h\\)\\);\")",
       "Bash(grep -r \"confidence_level\\\\|draft_data\" C:/xampp/htdocs/hivenews/apps/nextjs/app --include=*.ts --include=*.tsx)",
-      "Bash(git init:*)"
+      "Bash(git init:*)",
+      "Bash(grep -r \"alert_candidates\\\\|alertCandidates\\\\|alert candidate\" /c/xampp/htdocs/hivenews/apps/nextjs/app/dashboard --include=*.tsx --include=*.ts)"
     ]
   }
 }

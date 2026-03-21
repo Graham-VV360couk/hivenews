@@ -19,36 +19,37 @@ interface Source {
 }
 
 const PLATFORMS = [
-  { value: 'rss', label: 'RSS Feed' },
-  { value: 'x', label: 'X / Twitter' },
-  { value: 'reddit', label: 'Reddit' },
-  { value: 'github', label: 'GitHub' },
-  { value: 'hackernews', label: 'Hacker News' },
-  { value: 'youtube', label: 'YouTube' },
-  { value: 'facebook', label: 'Facebook' },
-  { value: 'instagram', label: 'Instagram' },
-  { value: 'linkedin', label: 'LinkedIn' },
-  { value: 'newsletter', label: 'Newsletter' },
-  { value: 'other', label: 'Other' },
+  { value: 'rss',         label: 'RSS' },
+  { value: 'x',           label: 'X / Twitter' },
+  { value: 'reddit',      label: 'Reddit' },
+  { value: 'github',      label: 'GitHub' },
+  { value: 'hackernews',  label: 'Hacker News' },
+  { value: 'youtube',     label: 'YouTube' },
+  { value: 'facebook',    label: 'Facebook' },
+  { value: 'instagram',   label: 'Instagram' },
+  { value: 'linkedin',    label: 'LinkedIn' },
+  { value: 'newsletter',  label: 'Newsletter' },
+  { value: 'other',       label: 'Other' },
 ];
 
 const DOMAINS = ['ai', 'vr', 'seo', 'vibe_coding', 'cross'];
-
 const TIER_LABELS: Record<number, string> = { 1: 'Major', 2: 'Established', 3: 'Minor' };
 const TIER_COLORS: Record<number, string> = { 1: '#22c55e', 2: '#F5A623', 3: '#666' };
-
 const EMPTY_FORM = { name: '', handle: '', url: '', platform: 'rss', domain_tags: '', tier: '3' };
 
 export default function SourcesPage() {
-  const [sources, setSources] = useState<Source[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [showAdd, setShowAdd] = useState(false);
-  const [form, setForm] = useState(EMPTY_FORM);
-  const [saving, setSaving] = useState(false);
-  const [editId, setEditId] = useState<string | null>(null);
-  const [toggling, setToggling] = useState<string | null>(null);
-  const [filterPlatform, setFilterPlatform] = useState('all');
+  const [sources, setSources]       = useState<Source[]>([]);
+  const [loading, setLoading]       = useState(true);
+  const [showAdd, setShowAdd]       = useState(false);
+  const [form, setForm]             = useState(EMPTY_FORM);
+  const [saving, setSaving]         = useState(false);
+  const [editId, setEditId]         = useState<string | null>(null);
+  const [toggling, setToggling]     = useState<string | null>(null);
+  const [deleting, setDeleting]     = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [tab, setTab]               = useState('all');
   const [showInactive, setShowInactive] = useState(false);
+  const [saveError, setSaveError]   = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const res = await fetch('/dashboard/api/sources');
@@ -61,22 +62,35 @@ export default function SourcesPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
+    setSaveError(null);
     const tags = form.domain_tags.split(',').map(t => t.trim()).filter(Boolean);
     const body = { ...form, domain_tags: tags };
 
     if (editId) {
-      await fetch(`/dashboard/api/sources/${editId}`, {
+      const res = await fetch(`/dashboard/api/sources/${editId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
+      if (!res.ok) {
+        const data = await res.json();
+        setSaveError(data.error ?? 'Failed to update');
+        setSaving(false);
+        return;
+      }
       setEditId(null);
     } else {
-      await fetch('/dashboard/api/sources', {
+      const res = await fetch('/dashboard/api/sources', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
+      if (!res.ok) {
+        const data = await res.json();
+        setSaveError(data.error ?? 'Failed to add');
+        setSaving(false);
+        return;
+      }
     }
     setSaving(false);
     setForm(EMPTY_FORM);
@@ -95,6 +109,7 @@ export default function SourcesPage() {
     });
     setEditId(s.id);
     setShowAdd(true);
+    setSaveError(null);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
@@ -109,13 +124,37 @@ export default function SourcesPage() {
     await load();
   }
 
-  const filtered = sources.filter(s => {
-    if (!showInactive && !s.is_active) return false;
-    if (filterPlatform !== 'all' && s.platform !== filterPlatform) return false;
-    return true;
-  });
+  async function handleDelete(id: string) {
+    setDeleting(id);
+    await fetch(`/dashboard/api/sources/${id}`, { method: 'DELETE' });
+    setDeleting(null);
+    setConfirmDelete(null);
+    await load();
+  }
 
-  const activePlatforms = [...new Set(sources.map(s => s.platform))];
+  // Build tabs from platforms that have at least one source
+  const platformCounts = sources.reduce<Record<string, number>>((acc, s) => {
+    if (showInactive || s.is_active) acc[s.platform] = (acc[s.platform] ?? 0) + 1;
+    return acc;
+  }, {});
+
+  const activeTabs = [
+    { value: 'all', label: 'All' },
+    ...PLATFORMS.filter(p => platformCounts[p.value] > 0).map(p => ({ value: p.value, label: p.label })),
+  ];
+
+  const filtered = sources
+    .filter(s => {
+      if (!showInactive && !s.is_active) return false;
+      if (tab !== 'all' && s.platform !== tab) return false;
+      return true;
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  const tabCount = (value: string) => {
+    if (value === 'all') return sources.filter(s => showInactive || s.is_active).length;
+    return platformCounts[value] ?? 0;
+  };
 
   return (
     <div>
@@ -127,13 +166,14 @@ export default function SourcesPage() {
           </p>
         </div>
         <button
-          onClick={() => { setShowAdd(!showAdd); setEditId(null); setForm(EMPTY_FORM); }}
+          onClick={() => { setShowAdd(!showAdd); setEditId(null); setForm(EMPTY_FORM); setSaveError(null); }}
           style={{ padding: '8px 16px', background: '#F5A623', color: '#0f0f0f', border: 'none', borderRadius: '4px', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}
         >
           + Add Source
         </button>
       </div>
 
+      {/* Add / Edit form */}
       {showAdd && (
         <form onSubmit={handleSubmit} style={{ background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: '6px', padding: '20px', marginBottom: '24px' }}>
           <h3 style={{ margin: '0 0 16px', fontSize: '15px', fontWeight: 600 }}>
@@ -176,28 +216,22 @@ export default function SourcesPage() {
                 style={inputStyle}
               />
               <div style={{ marginTop: '4px', display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-                {DOMAINS.map(d => (
-                  <button
-                    key={d}
-                    type="button"
-                    onClick={() => {
-                      const current = form.domain_tags.split(',').map(t => t.trim()).filter(Boolean);
-                      const next = current.includes(d) ? current.filter(t => t !== d) : [...current, d];
-                      setForm(f => ({ ...f, domain_tags: next.join(', ') }));
-                    }}
-                    style={{
-                      padding: '2px 8px',
-                      fontSize: '11px',
-                      borderRadius: '3px',
-                      border: '1px solid #333',
-                      cursor: 'pointer',
-                      background: form.domain_tags.split(',').map(t => t.trim()).includes(d) ? '#F5A623' : '#111',
-                      color: form.domain_tags.split(',').map(t => t.trim()).includes(d) ? '#0f0f0f' : '#666',
-                    }}
-                  >
-                    {d}
-                  </button>
-                ))}
+                {DOMAINS.map(d => {
+                  const active = form.domain_tags.split(',').map(t => t.trim()).includes(d);
+                  return (
+                    <button
+                      key={d} type="button"
+                      onClick={() => {
+                        const current = form.domain_tags.split(',').map(t => t.trim()).filter(Boolean);
+                        const next = current.includes(d) ? current.filter(t => t !== d) : [...current, d];
+                        setForm(f => ({ ...f, domain_tags: next.join(', ') }));
+                      }}
+                      style={{ padding: '2px 8px', fontSize: '11px', borderRadius: '3px', border: '1px solid #333', cursor: 'pointer', background: active ? '#F5A623' : '#111', color: active ? '#0f0f0f' : '#666' }}
+                    >
+                      {d}
+                    </button>
+                  );
+                })}
               </div>
             </div>
             <select
@@ -210,17 +244,21 @@ export default function SourcesPage() {
               <option value="3">Tier 3 — Minor</option>
             </select>
           </div>
+          {saveError && (
+            <div style={{ marginTop: '12px', padding: '8px 12px', background: '#1a0a0a', border: '1px solid #4a1a1a', borderRadius: '4px', color: '#ef4444', fontSize: '13px' }}>
+              {saveError}
+            </div>
+          )}
           <div style={{ display: 'flex', gap: '8px', marginTop: '16px' }}>
             <button
-              type="submit"
-              disabled={saving}
+              type="submit" disabled={saving}
               style={{ padding: '8px 16px', background: saving ? '#555' : '#F5A623', color: '#0f0f0f', border: 'none', borderRadius: '4px', fontSize: '13px', fontWeight: 600, cursor: saving ? 'not-allowed' : 'pointer' }}
             >
               {saving ? 'Saving…' : editId ? 'Update' : 'Add Source'}
             </button>
             <button
               type="button"
-              onClick={() => { setShowAdd(false); setEditId(null); setForm(EMPTY_FORM); }}
+              onClick={() => { setShowAdd(false); setEditId(null); setForm(EMPTY_FORM); setSaveError(null); }}
               style={{ padding: '8px 16px', background: 'none', border: '1px solid #333', color: '#888', borderRadius: '4px', fontSize: '13px', cursor: 'pointer' }}
             >
               Cancel
@@ -229,40 +267,63 @@ export default function SourcesPage() {
         </form>
       )}
 
-      {/* Filters */}
-      <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap' }}>
-        <select
-          value={filterPlatform}
-          onChange={e => setFilterPlatform(e.target.value)}
-          style={{ padding: '6px 10px', background: '#1a1a1a', border: '1px solid #2a2a2a', color: '#ccc', borderRadius: '4px', fontSize: '13px' }}
-        >
-          <option value="all">All platforms</option>
-          {activePlatforms.map(p => (
-            <option key={p} value={p}>{PLATFORMS.find(x => x.value === p)?.label ?? p}</option>
-          ))}
-        </select>
-        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: '#666', cursor: 'pointer' }}>
-          <input
-            type="checkbox"
-            checked={showInactive}
-            onChange={e => setShowInactive(e.target.checked)}
-          />
+      {/* Platform tabs */}
+      <div style={{ display: 'flex', gap: '2px', marginBottom: '0', flexWrap: 'wrap', borderBottom: '1px solid #2a2a2a' }}>
+        {activeTabs.map(t => {
+          const active = tab === t.value;
+          return (
+            <button
+              key={t.value}
+              onClick={() => setTab(t.value)}
+              style={{
+                padding: '8px 14px',
+                background: active ? '#1a1a1a' : 'none',
+                border: '1px solid #2a2a2a',
+                borderBottom: active ? '1px solid #1a1a1a' : '1px solid #2a2a2a',
+                marginBottom: active ? '-1px' : '0',
+                color: active ? '#e5e5e5' : '#555',
+                borderRadius: '4px 4px 0 0',
+                fontSize: '12px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+              }}
+            >
+              {t.label}
+              <span style={{
+                fontSize: '10px',
+                padding: '1px 5px',
+                borderRadius: '8px',
+                background: active ? '#2a2a2a' : '#1a1a1a',
+                color: active ? '#aaa' : '#444',
+              }}>
+                {tabCount(t.value)}
+              </span>
+            </button>
+          );
+        })}
+        <div style={{ flex: 1 }} />
+        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: '#555', cursor: 'pointer', padding: '8px 4px' }}>
+          <input type="checkbox" checked={showInactive} onChange={e => setShowInactive(e.target.checked)} />
           Show inactive
         </label>
-        <span style={{ fontSize: '13px', color: '#555' }}>{filtered.length} shown</span>
       </div>
 
+      {/* Table */}
       {loading ? (
         <div style={{ color: '#555', padding: '40px 0' }}>Loading…</div>
       ) : filtered.length === 0 ? (
-        <p style={{ color: '#555' }}>No sources found. Add the first one above.</p>
+        <div style={{ background: '#1a1a1a', border: '1px solid #2a2a2a', borderTop: 'none', borderRadius: '0 0 6px 6px', padding: '32px', color: '#555', textAlign: 'center', fontSize: '13px' }}>
+          No sources in this category.
+        </div>
       ) : (
-        <div style={{ background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: '6px', overflow: 'hidden' }}>
+        <div style={{ background: '#1a1a1a', border: '1px solid #2a2a2a', borderTop: 'none', borderRadius: '0 0 6px 6px', overflow: 'hidden' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
             <thead>
               <tr style={{ borderBottom: '1px solid #2a2a2a' }}>
                 <th style={th}>Source</th>
-                <th style={th}>Platform</th>
+                <th style={tab === 'all' ? th : { ...th, display: 'none' }}>Platform</th>
                 <th style={th}>Tier</th>
                 <th style={th}>Domains</th>
                 <th style={{ ...th, textAlign: 'right' }}>Signals</th>
@@ -274,23 +335,22 @@ export default function SourcesPage() {
               {filtered.map((s, i) => (
                 <tr
                   key={s.id}
-                  style={{
-                    borderBottom: i < filtered.length - 1 ? '1px solid #1f1f1f' : 'none',
-                    opacity: s.is_active ? 1 : 0.45,
-                  }}
+                  style={{ borderBottom: i < filtered.length - 1 ? '1px solid #1f1f1f' : 'none', opacity: s.is_active ? 1 : 0.45 }}
                 >
                   <td style={{ padding: '10px 16px' }}>
                     <div style={{ fontWeight: 500, color: '#e5e5e5' }}>{s.name}</div>
                     {s.url && (
-                      <div style={{ fontSize: '11px', color: '#555', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '200px' }}>
-                        {s.url}
+                      <div style={{ fontSize: '11px', color: '#555', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '220px' }}>
+                        <a href={s.url} target="_blank" rel="noopener noreferrer" style={{ color: '#555', textDecoration: 'none' }}>{s.url}</a>
                       </div>
                     )}
-                  </td>
-                  <td style={{ padding: '10px 16px', color: '#888' }}>
-                    {PLATFORMS.find(p => p.value === s.platform)?.label ?? s.platform}
                     {s.handle && <div style={{ fontSize: '11px', color: '#555' }}>{s.handle}</div>}
                   </td>
+                  {tab === 'all' && (
+                    <td style={{ padding: '10px 16px', color: '#666', fontSize: '12px' }}>
+                      {PLATFORMS.find(p => p.value === s.platform)?.label ?? s.platform}
+                    </td>
+                  )}
                   <td style={{ padding: '10px 16px' }}>
                     <span style={{ color: TIER_COLORS[s.tier] || '#666', fontSize: '12px', fontWeight: 600 }}>
                       T{s.tier} {TIER_LABELS[s.tier] || ''}
@@ -310,21 +370,46 @@ export default function SourcesPage() {
                     ) : <span style={{ color: '#555' }}>—</span>}
                   </td>
                   <td style={{ padding: '10px 16px', textAlign: 'right' }}>
-                    <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end' }}>
-                      <button
-                        onClick={() => startEdit(s)}
-                        style={{ padding: '4px 10px', background: '#111', border: '1px solid #333', color: '#aaa', borderRadius: '3px', fontSize: '12px', cursor: 'pointer' }}
-                      >
-                        Edit
-                      </button>
-                      <button
-                        onClick={() => toggleActive(s.id)}
-                        disabled={toggling === s.id}
-                        style={{ padding: '4px 10px', background: s.is_active ? '#111' : '#1a2a1a', border: `1px solid ${s.is_active ? '#333' : '#2a4a2a'}`, color: s.is_active ? '#888' : '#22c55e', borderRadius: '3px', fontSize: '12px', cursor: 'pointer' }}
-                      >
-                        {toggling === s.id ? '…' : s.is_active ? 'Pause' : 'Activate'}
-                      </button>
-                    </div>
+                    {confirmDelete === s.id ? (
+                      <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end', alignItems: 'center' }}>
+                        <span style={{ fontSize: '12px', color: '#888' }}>Delete?</span>
+                        <button
+                          onClick={() => handleDelete(s.id)}
+                          disabled={deleting === s.id}
+                          style={{ padding: '4px 10px', background: '#2a0a0a', border: '1px solid #5a1a1a', color: '#ef4444', borderRadius: '3px', fontSize: '12px', cursor: 'pointer' }}
+                        >
+                          {deleting === s.id ? '…' : 'Yes'}
+                        </button>
+                        <button
+                          onClick={() => setConfirmDelete(null)}
+                          style={{ padding: '4px 10px', background: '#111', border: '1px solid #333', color: '#aaa', borderRadius: '3px', fontSize: '12px', cursor: 'pointer' }}
+                        >
+                          No
+                        </button>
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end' }}>
+                        <button
+                          onClick={() => startEdit(s)}
+                          style={{ padding: '4px 10px', background: '#111', border: '1px solid #333', color: '#aaa', borderRadius: '3px', fontSize: '12px', cursor: 'pointer' }}
+                        >
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => toggleActive(s.id)}
+                          disabled={toggling === s.id}
+                          style={{ padding: '4px 10px', background: s.is_active ? '#111' : '#1a2a1a', border: `1px solid ${s.is_active ? '#333' : '#2a4a2a'}`, color: s.is_active ? '#888' : '#22c55e', borderRadius: '3px', fontSize: '12px', cursor: 'pointer' }}
+                        >
+                          {toggling === s.id ? '…' : s.is_active ? 'Pause' : 'Activate'}
+                        </button>
+                        <button
+                          onClick={() => setConfirmDelete(s.id)}
+                          style={{ padding: '4px 10px', background: '#111', border: '1px solid #2a1a1a', color: '#662222', borderRadius: '3px', fontSize: '12px', cursor: 'pointer' }}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -352,4 +437,7 @@ const th: React.CSSProperties = {
   textAlign: 'left',
   color: '#555',
   fontWeight: 500,
+  fontSize: '11px',
+  textTransform: 'uppercase',
+  letterSpacing: '0.05em',
 };

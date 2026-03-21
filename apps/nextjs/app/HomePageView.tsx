@@ -4,6 +4,18 @@
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 
+export interface Alert {
+  id: string;
+  alert_tier: string;       // breaking | significant | watch
+  confidence_level: string; // confirmed | developing | pinch_of_salt
+  composite_score: number;
+  corroboration_count: number;
+  fired_at: string;
+  signal_title: string | null;
+  signal_url: string | null;
+  domain_tags: string[];
+}
+
 export interface Story {
   id: string;
   name: string;
@@ -220,6 +232,189 @@ function StoryCard({ story, delay }: { story: Story; delay: number }) {
   );
 }
 
+const ALERT_TIER_CONFIG: Record<string, { label: string; color: string; border: string }> = {
+  breaking:    { label: 'BREAKING',    color: '#e74c3c', border: '#c0392b' },
+  significant: { label: 'SIGNIFICANT', color: '#e8950a', border: '#b07300' },
+  watch:       { label: 'WATCH',       color: '#4a9eff', border: '#2a6eb0' },
+};
+
+const CONFIDENCE_CONFIG: Record<string, { label: string; color: string }> = {
+  confirmed:     { label: 'CONFIRMED',     color: '#22c55e' },
+  developing:    { label: 'DEVELOPING',    color: '#e8950a' },
+  pinch_of_salt: { label: 'PINCH OF SALT', color: '#4a4d5e' },
+};
+
+function AlertCard({ alert }: { alert: Alert }) {
+  const [hovered, setHovered] = useState(false);
+  const tierCfg = ALERT_TIER_CONFIG[alert.alert_tier] ?? ALERT_TIER_CONFIG.watch;
+  const confCfg = CONFIDENCE_CONFIG[alert.confidence_level] ?? CONFIDENCE_CONFIG.pinch_of_salt;
+  const timeAgo = (() => {
+    const diff = Date.now() - new Date(alert.fired_at).getTime();
+    const h = Math.floor(diff / 3600000);
+    const m = Math.floor((diff % 3600000) / 60000);
+    return h > 0 ? `${h}h ago` : `${m}m ago`;
+  })();
+
+  return (
+    <div
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        display: 'flex',
+        gap: '16px',
+        alignItems: 'flex-start',
+        padding: '16px 20px',
+        background: hovered ? '#0e0f17' : '#0a0b12',
+        border: `1px solid ${hovered ? tierCfg.border : '#1a1d28'}`,
+        borderLeft: `3px solid ${tierCfg.border}`,
+        borderRadius: '3px',
+        transition: 'all 0.2s ease',
+        cursor: alert.signal_url ? 'pointer' : 'default',
+      }}
+      onClick={() => alert.signal_url && window.open(alert.signal_url, '_blank', 'noopener')}
+    >
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', flexWrap: 'wrap' }}>
+          <span style={{
+            fontFamily: "'Space Mono', monospace",
+            fontSize: '9px', fontWeight: 700, letterSpacing: '0.16em',
+            padding: '2px 7px',
+            background: tierCfg.border,
+            color: '#fff',
+            borderRadius: '2px',
+          }}>
+            {tierCfg.label}
+          </span>
+          <span style={{
+            fontFamily: "'Space Mono', monospace",
+            fontSize: '9px', letterSpacing: '0.12em',
+            color: confCfg.color,
+            border: `1px solid ${confCfg.color}40`,
+            padding: '2px 7px',
+            borderRadius: '2px',
+          }}>
+            {confCfg.label}
+          </span>
+          {(alert.domain_tags || []).map(tag => (
+            <span key={tag} style={{
+              fontFamily: "'Space Mono', monospace",
+              fontSize: '9px', letterSpacing: '0.08em',
+              color: '#2a2d3a', padding: '2px 6px',
+              border: '1px solid #1e2030', borderRadius: '2px',
+            }}>
+              {DOMAIN_LABELS[tag] ?? tag}
+            </span>
+          ))}
+          <span style={{
+            fontFamily: "'Space Mono', monospace",
+            fontSize: '9px', color: '#252836',
+            marginLeft: 'auto',
+          }}>
+            {timeAgo}
+          </span>
+        </div>
+        <p style={{
+          margin: 0,
+          fontFamily: "'Cormorant Garamond', Georgia, serif",
+          fontSize: '17px', fontWeight: 600, lineHeight: 1.35,
+          color: hovered ? '#e6e8f0' : '#b0b3c8',
+          transition: 'color 0.2s ease',
+        }}>
+          {alert.signal_title ?? '(untitled signal)'}
+        </p>
+      </div>
+      <div style={{ flexShrink: 0, textAlign: 'right', paddingTop: '2px' }}>
+        <div style={{
+          fontFamily: "'Space Mono', monospace",
+          fontSize: '22px', fontWeight: 700,
+          color: tierCfg.color, lineHeight: 1,
+        }}>
+          {alert.composite_score?.toFixed(1) ?? '—'}
+        </div>
+        <div style={{
+          fontFamily: "'Space Mono', monospace",
+          fontSize: '9px', color: '#2a2d3a',
+          marginTop: '3px', letterSpacing: '0.05em',
+        }}>
+          {alert.corroboration_count} src{alert.corroboration_count !== 1 ? 's' : ''}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AlertsWidget({ alerts }: { alerts: Alert[] }) {
+  const [open, setOpen] = useState(false);
+  if (alerts.length === 0) return null;
+
+  const hasBreaking = alerts.some(a => a.alert_tier === 'breaking');
+
+  return (
+    <div style={{ marginBottom: '48px' }}>
+      {/* Toggle bar */}
+      <button
+        onClick={() => setOpen(v => !v)}
+        style={{
+          width: '100%',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '12px',
+          padding: '12px 20px',
+          background: open ? '#0e0f17' : '#0a0b12',
+          border: `1px solid ${hasBreaking ? '#c0392b' : '#b07300'}`,
+          borderRadius: open ? '4px 4px 0 0' : '4px',
+          cursor: 'pointer',
+          transition: 'all 0.2s ease',
+          textAlign: 'left',
+        }}
+      >
+        <span style={{
+          display: 'inline-block', width: '7px', height: '7px',
+          borderRadius: '50%',
+          background: hasBreaking ? '#e74c3c' : '#e8950a',
+          boxShadow: `0 0 8px ${hasBreaking ? 'rgba(231,76,60,0.8)' : 'rgba(232,149,10,0.8)'}`,
+          animation: 'pulse-dot 1.4s ease-in-out infinite',
+          flexShrink: 0,
+        }} />
+        <span style={{
+          fontFamily: "'Space Mono', monospace",
+          fontSize: '10px', fontWeight: 700,
+          letterSpacing: '0.2em',
+          color: hasBreaking ? '#e74c3c' : '#e8950a',
+        }}>
+          {alerts.length} ACTIVE ALERT{alerts.length !== 1 ? 'S' : ''} · LAST 24H
+        </span>
+        <span style={{
+          fontFamily: "'Space Mono', monospace",
+          fontSize: '9px', color: '#2a2d3a',
+          marginLeft: 'auto',
+          letterSpacing: '0.1em',
+        }}>
+          {open ? '▲ HIDE' : '▼ VIEW'}
+        </span>
+      </button>
+
+      {/* Expanded cards */}
+      {open && (
+        <div style={{
+          border: `1px solid ${hasBreaking ? '#c0392b' : '#b07300'}`,
+          borderTop: 'none',
+          borderRadius: '0 0 4px 4px',
+          overflow: 'hidden',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '1px',
+          background: '#0a0b0f',
+        }}>
+          {alerts.map(alert => (
+            <AlertCard key={alert.id} alert={alert} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Section({ tier, stories }: { tier: Tier; stories: Story[] }) {
   if (stories.length === 0) return null;
   const cfg = TIER_CONFIG[tier];
@@ -273,7 +468,7 @@ function Section({ tier, stories }: { tier: Tier; stories: Story[] }) {
   );
 }
 
-export function HomePageView({ stories }: { stories: Story[] }) {
+export function HomePageView({ stories, alerts = [] }: { stories: Story[]; alerts?: Alert[] }) {
   const alert = stories.filter(s => getTier(s) === 'alert');
   const confirmed = stories.filter(s => getTier(s) === 'confirmed');
   const possible = stories.filter(s => getTier(s) === 'possible');
@@ -571,6 +766,7 @@ export function HomePageView({ stories }: { stories: Story[] }) {
 
         {/* Main content */}
         <main style={{ maxWidth: '1100px', margin: '0 auto', padding: '56px 40px 80px' }}>
+          <AlertsWidget alerts={alerts} />
           {stories.length === 0 ? (
             <div style={{ padding: '80px 0', textAlign: 'center' }}>
               <div style={{
