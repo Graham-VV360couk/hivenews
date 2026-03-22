@@ -1066,10 +1066,11 @@ _REDDIT_SIGNAL_PHRASES = {
     "open source", "open-source", "github.com",
 }
 
-_NOISE_DOMAINS = {
+_REDDIT_MEDIA_DOMAINS = {
+    # Only filter genuine media/image hosts — NOT reddit.com itself,
+    # since Reddit RSS entry links ARE reddit.com permalinks (that's what we want)
     "i.redd.it", "v.redd.it", "imgur.com", "i.imgur.com",
     "gfycat.com", "redgifs.com", "streamable.com",
-    "reddit.com", "old.reddit.com",
 }
 
 
@@ -1182,7 +1183,7 @@ async def poll_reddit_sources() -> dict:
                 try:
                     from urllib.parse import urlparse
                     domain = urlparse(post_url).netloc.lower().lstrip("www.")
-                    if domain in _NOISE_DOMAINS:
+                    if domain in _REDDIT_MEDIA_DOMAINS:
                         continue
                     path = urlparse(post_url).path.lower()
                     if any(path.endswith(ext) for ext in (".jpg", ".jpeg", ".png", ".gif", ".mp4", ".webm")):

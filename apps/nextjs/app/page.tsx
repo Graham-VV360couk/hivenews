@@ -14,20 +14,36 @@ async function getStories(): Promise<Story[]> {
     const sql = getDb();
     const rows = await sql<Story[]>`
       SELECT
-        id,
-        name,
-        LEFT(narrative, 400)                           AS description,
-        domain_tags,
-        COALESCE(readiness_score, 0)::float            AS confidence_score,
-        CASE WHEN readiness_score >= 75 THEN 'rising' ELSE 'stable' END AS confidence_direction,
-        'active'                                        AS status,
-        narrative_updated_at                            AS last_updated_at,
-        NULL::text                                      AS url
-      FROM clusters
-      WHERE is_active = TRUE
-        AND narrative IS NOT NULL
-        AND name IS NOT NULL
-      ORDER BY narrative_updated_at DESC NULLS LAST
+        c.id,
+        c.name,
+        LEFT(c.narrative, 400)  AS description,
+        c.domain_tags,
+        GREATEST(
+          COALESCE(c.readiness_score, 0)::float,
+          CASE
+            WHEN tf.min_tier = 1 THEN 70
+            WHEN tf.min_tier = 2 THEN 45
+            ELSE 0
+          END
+        )                       AS confidence_score,
+        CASE WHEN GREATEST(
+          COALESCE(c.readiness_score, 0)::float,
+          CASE WHEN tf.min_tier = 1 THEN 70 WHEN tf.min_tier = 2 THEN 45 ELSE 0 END
+        ) >= 75 THEN 'rising' ELSE 'stable' END AS confidence_direction,
+        'active'                AS status,
+        c.narrative_updated_at  AS last_updated_at,
+        NULL::text              AS url
+      FROM clusters c
+      LEFT JOIN LATERAL (
+        SELECT MIN(src.tier) AS min_tier
+        FROM signals sig
+        JOIN sources src ON src.id = sig.source_id
+        WHERE sig.cluster_id = c.id
+      ) tf ON true
+      WHERE c.is_active = TRUE
+        AND c.narrative IS NOT NULL
+        AND c.name IS NOT NULL
+      ORDER BY c.narrative_updated_at DESC NULLS LAST
       LIMIT 30
     `;
     return rows;
