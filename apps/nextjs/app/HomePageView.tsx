@@ -16,6 +16,13 @@ export interface Alert {
   domain_tags: string[];
 }
 
+export interface SecuritySignal {
+  title: string;
+  url: string | null;
+  ingested_at: string;
+  source_name: string;
+}
+
 export interface Story {
   id: string;
   name: string;
@@ -82,6 +89,7 @@ const DOMAIN_LABELS: Record<string, string> = {
   seo: 'SEO',
   vibe_coding: 'Vibe Coding',
   cross: 'Cross-Domain',
+  security: 'Cyber Threat',
 };
 
 const DIR_SYMBOL: Record<string, string> = {
@@ -471,7 +479,7 @@ function Section({ tier, stories }: { tier: Tier; stories: Story[] }) {
 type SortMode = 'level' | 'date';
 type DateRange = 'all' | '7d' | '30d';
 
-const ALL_DOMAINS = ['ai', 'vr', 'seo', 'vibe_coding', 'cross'] as const;
+const ALL_DOMAINS = ['ai', 'vr', 'seo', 'vibe_coding', 'cross', 'security'] as const;
 
 function applyFilters(
   stories: Story[],
@@ -624,7 +632,82 @@ function ControlBar({
   );
 }
 
-export function HomePageView({ stories, alerts = [] }: { stories: Story[]; alerts?: Alert[] }) {
+function ThreatTicker({ signals }: { signals: SecuritySignal[] }) {
+  if (signals.length === 0) return null;
+  const items = [...signals, ...signals]; // duplicate for seamless loop
+
+  return (
+    <div style={{
+      background: '#0d080a',
+      borderBottom: '1px solid #3d0f0f',
+      overflow: 'hidden',
+      height: '28px',
+      display: 'flex',
+      alignItems: 'center',
+    }}>
+      <div style={{
+        background: '#8b1a1a',
+        padding: '0 12px',
+        height: '100%',
+        display: 'flex',
+        alignItems: 'center',
+        flexShrink: 0,
+        marginRight: '16px',
+      }}>
+        <span style={{
+          fontFamily: "'Space Mono', monospace",
+          fontSize: '9px', fontWeight: 700,
+          letterSpacing: '0.2em', color: '#ffcdd2',
+        }}>
+          THREATS
+        </span>
+      </div>
+
+      <div style={{ overflow: 'hidden', flex: 1 }}>
+        <div className="threat-ticker-inner">
+          {items.map((sig, i) => (
+            <span key={i} style={{ display: 'inline-flex', alignItems: 'center' }}>
+              <span style={{
+                fontFamily: "'Space Mono', monospace", fontSize: '9px',
+                color: '#c0392b', letterSpacing: '0.08em', padding: '0 8px 0 16px',
+              }}>
+                {sig.source_name}
+              </span>
+              <span style={{ fontFamily: "'Space Mono', monospace", fontSize: '10px', color: '#3d1515', padding: '0 4px' }}>·</span>
+              {sig.url ? (
+                <a href={sig.url} target="_blank" rel="noopener noreferrer"
+                  style={{ fontFamily: "'Space Mono', monospace", fontSize: '10px', color: '#c9a0a0', letterSpacing: '0.03em', padding: '0 8px', textDecoration: 'none' }}
+                  onMouseEnter={e => (e.currentTarget.style.color = '#f08080')}
+                  onMouseLeave={e => (e.currentTarget.style.color = '#c9a0a0')}
+                >
+                  {sig.title}
+                </a>
+              ) : (
+                <span style={{ fontFamily: "'Space Mono', monospace", fontSize: '10px', color: '#c9a0a0', letterSpacing: '0.03em', padding: '0 8px' }}>
+                  {sig.title}
+                </span>
+              )}
+              <span style={{ fontFamily: "'Space Mono', monospace", fontSize: '9px', color: '#4a2020', padding: '0 16px 0 4px' }}>
+                {timeAgoStr(sig.ingested_at)}
+              </span>
+              <span style={{ fontFamily: "'Space Mono', monospace", fontSize: '10px', color: '#3d1515', padding: '0 8px' }}>⬥</span>
+            </span>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function HomePageView({
+  stories,
+  alerts = [],
+  securitySignals = [],
+}: {
+  stories: Story[];
+  alerts?: Alert[];
+  securitySignals?: SecuritySignal[];
+}) {
   const [sortMode, setSortMode] = useState<SortMode>('level');
   const [activeDomains, setActiveDomains] = useState<Set<string>>(new Set());
   const [dateRange, setDateRange] = useState<DateRange>('all');
@@ -731,6 +814,14 @@ export function HomePageView({ stories, alerts = [] }: { stories: Story[]; alert
           white-space: nowrap;
         }
         .ticker-inner:hover { animation-play-state: paused; }
+
+        .threat-ticker-inner {
+          display: inline-flex;
+          gap: 0;
+          animation: ticker-scroll 45s linear infinite;
+          white-space: nowrap;
+        }
+        .threat-ticker-inner:hover { animation-play-state: paused; }
       `}</style>
 
       <div className="home-root">
@@ -789,6 +880,8 @@ export function HomePageView({ stories, alerts = [] }: { stories: Story[]; alert
             </div>
           </div>
         </div>
+
+        <ThreatTicker signals={securitySignals} />
 
         {/* Header */}
         <header style={{

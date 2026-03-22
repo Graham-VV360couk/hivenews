@@ -1,6 +1,6 @@
 // apps/nextjs/app/page.tsx
 import { getDb } from '@/lib/db';
-import { HomePageView, type Story, type Alert } from './HomePageView';
+import { HomePageView, type Story, type Alert, type SecuritySignal } from './HomePageView';
 
 export const dynamic = 'force-dynamic';
 
@@ -78,7 +78,34 @@ async function getAlerts(): Promise<Alert[]> {
   }
 }
 
+async function getSecuritySignals(): Promise<SecuritySignal[]> {
+  try {
+    const sql = getDb();
+    const rows = await sql<SecuritySignal[]>`
+      SELECT
+        s.title,
+        s.url,
+        s.ingested_at,
+        src.name AS source_name
+      FROM signals s
+      JOIN sources src ON src.id = s.source_id
+      WHERE 'security' = ANY(s.domain_tags)
+        AND s.ingested_at > NOW() - INTERVAL '48 hours'
+        AND s.title IS NOT NULL
+      ORDER BY s.ingested_at DESC
+      LIMIT 20
+    `;
+    return rows;
+  } catch {
+    return [];
+  }
+}
+
 export default async function HomePage() {
-  const [stories, alerts] = await Promise.all([getStories(), getAlerts()]);
-  return <HomePageView stories={stories} alerts={alerts} />;
+  const [stories, alerts, securitySignals] = await Promise.all([
+    getStories(),
+    getAlerts(),
+    getSecuritySignals(),
+  ]);
+  return <HomePageView stories={stories} alerts={alerts} securitySignals={securitySignals} />;
 }
