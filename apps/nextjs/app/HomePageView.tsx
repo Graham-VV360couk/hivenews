@@ -69,8 +69,8 @@ const TIER_CONFIG = {
     label: 'PINCH OF SALT',
     borderColor: '#2a2d3a',
     badgeBg: 'transparent',
-    badgeText: '#4a4d5e',
-    headerColor: '#4a4d5e',
+    badgeText: '#8e92ae',
+    headerColor: '#8e92ae',
     glowColor: 'transparent',
     sectionTitle: 'Pinch of Salt',
   },
@@ -170,7 +170,7 @@ function StoryCard({ story, delay }: { story: Story; delay: number }) {
                 fontFamily: "'Space Mono', monospace",
                 fontSize: '9px',
                 letterSpacing: '0.1em',
-                color: '#363848',
+                color: '#72768e',
                 padding: '2px 6px',
                 border: '1px solid #1e2030',
                 borderRadius: '2px',
@@ -198,7 +198,7 @@ function StoryCard({ story, delay }: { story: Story; delay: number }) {
             margin: 0,
             fontFamily: "'Lora', Georgia, serif",
             fontSize: '13px',
-            color: '#525669',
+            color: '#8a8da8',
             lineHeight: 1.65,
           }}>
             {story.description}
@@ -220,7 +220,7 @@ function StoryCard({ story, delay }: { story: Story; delay: number }) {
           <div style={{
             fontFamily: "'Space Mono', monospace",
             fontSize: '10px',
-            color: '#363848',
+            color: '#72768e',
             marginTop: '4px',
             letterSpacing: '0.05em',
           }}>
@@ -241,7 +241,7 @@ const ALERT_TIER_CONFIG: Record<string, { label: string; color: string; border: 
 const CONFIDENCE_CONFIG: Record<string, { label: string; color: string }> = {
   confirmed:     { label: 'CONFIRMED',     color: '#22c55e' },
   developing:    { label: 'DEVELOPING',    color: '#e8950a' },
-  pinch_of_salt: { label: 'PINCH OF SALT', color: '#4a4d5e' },
+  pinch_of_salt: { label: 'PINCH OF SALT', color: '#8e92ae' },
 };
 
 function AlertCard({ alert }: { alert: Alert }) {
@@ -299,7 +299,7 @@ function AlertCard({ alert }: { alert: Alert }) {
             <span key={tag} style={{
               fontFamily: "'Space Mono', monospace",
               fontSize: '9px', letterSpacing: '0.08em',
-              color: '#2a2d3a', padding: '2px 6px',
+              color: '#606478', padding: '2px 6px',
               border: '1px solid #1e2030', borderRadius: '2px',
             }}>
               {DOMAIN_LABELS[tag] ?? tag}
@@ -307,7 +307,7 @@ function AlertCard({ alert }: { alert: Alert }) {
           ))}
           <span style={{
             fontFamily: "'Space Mono', monospace",
-            fontSize: '9px', color: '#252836',
+            fontSize: '9px', color: '#606478',
             marginLeft: 'auto',
           }}>
             {timeAgo}
@@ -333,7 +333,7 @@ function AlertCard({ alert }: { alert: Alert }) {
         </div>
         <div style={{
           fontFamily: "'Space Mono', monospace",
-          fontSize: '9px', color: '#2a2d3a',
+          fontSize: '9px', color: '#606478',
           marginTop: '3px', letterSpacing: '0.05em',
         }}>
           {alert.corroboration_count} src{alert.corroboration_count !== 1 ? 's' : ''}
@@ -386,7 +386,7 @@ function AlertsWidget({ alerts }: { alerts: Alert[] }) {
         </span>
         <span style={{
           fontFamily: "'Space Mono', monospace",
-          fontSize: '9px', color: '#2a2d3a',
+          fontSize: '9px', color: '#606478',
           marginLeft: 'auto',
           letterSpacing: '0.1em',
         }}>
@@ -451,7 +451,7 @@ function Section({ tier, stories }: { tier: Tier; stories: Story[] }) {
         <span style={{
           fontFamily: "'Space Mono', monospace",
           fontSize: '10px',
-          color: '#2a2d3a',
+          color: '#606478',
           letterSpacing: '0.05em',
         }}>
           {stories.length} {stories.length === 1 ? 'story' : 'stories'}
@@ -535,7 +535,7 @@ function ControlBar({
   };
   const btnInactive: React.CSSProperties = {
     ...btnBase,
-    color: '#4a4d62',
+    color: '#8e92ae',
   };
 
   return (
@@ -581,7 +581,7 @@ function ControlBar({
               padding: '5px 10px',
               background: on ? 'rgba(74, 158, 255, 0.1)' : 'transparent',
               border: on ? '1px solid #4a9eff' : '1px solid #1e2030',
-              color: on ? '#4a9eff' : '#2a2d3a',
+              color: on ? '#4a9eff' : '#606478',
               borderRadius: '2px',
               cursor: 'pointer',
               transition: 'all 0.15s ease',
@@ -614,7 +614,7 @@ function ControlBar({
       <span style={{
         fontFamily: "'Space Mono', monospace",
         fontSize: '9px',
-        color: '#252836',
+        color: '#606478',
         letterSpacing: '0.1em',
         marginLeft: 'auto',
       }}>
@@ -689,11 +689,11 @@ export function HomePageView({ stories, alerts = [] }: { stories: Story[]; alert
           font-family: 'Space Mono', monospace;
           font-size: 11px;
           letter-spacing: 0.12em;
-          color: #3a3d52;
+          color: #8084a0;
           text-decoration: none;
           transition: color 0.2s ease;
         }
-        .nav-link:hover { color: #8a8da8; }
+        .nav-link:hover { color: #c0c4dc; }
 
         .admin-btn {
           font-family: 'Space Mono', monospace;
@@ -702,7 +702,7 @@ export function HomePageView({ stories, alerts = [] }: { stories: Story[]; alert
           padding: 8px 16px;
           background: transparent;
           border: 1px solid #252836;
-          color: #5a5e73;
+          color: #9094b0;
           border-radius: 2px;
           text-decoration: none;
           transition: all 0.2s ease;
@@ -779,7 +779,7 @@ export function HomePageView({ stories, alerts = [] }: { stories: Story[]; alert
                 <span key={i} style={{
                   fontFamily: "'Space Mono', monospace",
                   fontSize: '10px',
-                  color: item === '·' ? '#2a2d3a' : '#3a3d52',
+                  color: item === '·' ? '#505470' : '#80849e',
                   letterSpacing: '0.05em',
                   padding: '0 16px',
                 }}>
@@ -813,7 +813,7 @@ export function HomePageView({ stories, alerts = [] }: { stories: Story[]; alert
               fontFamily: "'Space Mono', monospace",
               fontSize: '9px',
               letterSpacing: '0.25em',
-              color: '#252836',
+              color: '#606478',
               textTransform: 'uppercase',
             }}>
               Intelligence Feed
@@ -878,7 +878,7 @@ export function HomePageView({ stories, alerts = [] }: { stories: Story[]; alert
           <p className="hero-animate-delay-2" style={{
             fontFamily: "'Lora', Georgia, serif",
             fontSize: '16px',
-            color: '#4a4d62',
+            color: '#8e92ae',
             maxWidth: '520px',
             lineHeight: 1.7,
             margin: '0 0 36px',
@@ -931,7 +931,7 @@ export function HomePageView({ stories, alerts = [] }: { stories: Story[]; alert
             <span style={{
               fontFamily: "'Space Mono', monospace",
               fontSize: '9px',
-              color: '#252836',
+              color: '#606478',
               letterSpacing: '0.05em',
               marginLeft: '4px',
             }}>
@@ -955,7 +955,7 @@ export function HomePageView({ stories, alerts = [] }: { stories: Story[]; alert
                 fontFamily: "'Space Mono', monospace",
                 fontSize: '10px',
                 letterSpacing: '0.25em',
-                color: '#1e2030',
+                color: '#555870',
                 marginBottom: '16px',
               }}>
                 {stories.length === 0 ? 'NO ACTIVE SIGNALS' : 'NO RESULTS — TRY DIFFERENT FILTERS'}
@@ -964,7 +964,7 @@ export function HomePageView({ stories, alerts = [] }: { stories: Story[]; alert
                 fontFamily: "'Cormorant Garamond', Georgia, serif",
                 fontSize: '22px',
                 fontStyle: 'italic',
-                color: '#252836',
+                color: '#606478',
                 margin: 0,
               }}>
                 {stories.length === 0 ? 'The hive is watching. Check back soon.' : 'Adjust your filters above.'}
@@ -1011,7 +1011,7 @@ export function HomePageView({ stories, alerts = [] }: { stories: Story[]; alert
                             <span key={tag} style={{
                               fontFamily: "'Space Mono', monospace",
                               fontSize: '9px', letterSpacing: '0.1em',
-                              color: '#363848', padding: '2px 6px',
+                              color: '#72768e', padding: '2px 6px',
                               border: '1px solid #1e2030', borderRadius: '2px',
                             }}>
                               {DOMAIN_LABELS[tag] ?? tag}
@@ -1020,7 +1020,7 @@ export function HomePageView({ stories, alerts = [] }: { stories: Story[]; alert
                           {story.last_updated_at && (
                             <span style={{
                               fontFamily: "'Space Mono', monospace",
-                              fontSize: '9px', color: '#2a2d3a',
+                              fontSize: '9px', color: '#606478',
                               letterSpacing: '0.08em', marginLeft: 'auto',
                             }}>
                               {timeAgoStr(story.last_updated_at)}
@@ -1038,7 +1038,7 @@ export function HomePageView({ stories, alerts = [] }: { stories: Story[]; alert
                             </Link>
                           )}
                         </h3>
-                        <p style={{ margin: 0, fontFamily: "'Lora', Georgia, serif", fontSize: '13px', color: '#525669', lineHeight: 1.6 }}>
+                        <p style={{ margin: 0, fontFamily: "'Lora', Georgia, serif", fontSize: '13px', color: '#8a8da8', lineHeight: 1.6 }}>
                           {story.description}
                         </p>
                       </div>
@@ -1046,7 +1046,7 @@ export function HomePageView({ stories, alerts = [] }: { stories: Story[]; alert
                         <div style={{ fontFamily: "'Space Mono', monospace", fontSize: '26px', fontWeight: 700, color: '#e8950a', lineHeight: 1, letterSpacing: '-1px' }}>
                           {story.confidence_score?.toFixed(1) ?? '—'}
                         </div>
-                        <div style={{ fontFamily: "'Space Mono', monospace", fontSize: '10px', color: '#363848', marginTop: '4px' }}>
+                        <div style={{ fontFamily: "'Space Mono', monospace", fontSize: '10px', color: '#72768e', marginTop: '4px' }}>
                           {DIR_SYMBOL[story.confidence_direction] ?? ''} /10
                         </div>
                       </div>
@@ -1119,7 +1119,7 @@ export function HomePageView({ stories, alerts = [] }: { stories: Story[]; alert
                     <p style={{
                       fontFamily: "'Lora', Georgia, serif",
                       fontSize: '14px',
-                      color: '#3a3d52',
+                      color: '#7e82a0',
                       lineHeight: 1.75,
                       margin: '0 0 24px',
                       fontStyle: 'italic',
@@ -1154,7 +1154,7 @@ export function HomePageView({ stories, alerts = [] }: { stories: Story[]; alert
                           <span style={{
                             fontFamily: "'Lora', Georgia, serif",
                             fontSize: '13px',
-                            color: '#3a3d52',
+                            color: '#7e82a0',
                           }}>
                             {item}
                           </span>
@@ -1175,7 +1175,7 @@ export function HomePageView({ stories, alerts = [] }: { stories: Story[]; alert
                         fontFamily: "'Space Mono', monospace",
                         fontSize: '9px',
                         letterSpacing: '0.2em',
-                        color: '#252836',
+                        color: '#606478',
                         marginBottom: '12px',
                       }}>
                         ACCESS TIER
@@ -1193,7 +1193,7 @@ export function HomePageView({ stories, alerts = [] }: { stories: Story[]; alert
                       <div style={{
                         fontFamily: "'Space Mono', monospace",
                         fontSize: '10px',
-                        color: '#252836',
+                        color: '#606478',
                         marginBottom: '24px',
                         letterSpacing: '0.05em',
                       }}>
@@ -1207,7 +1207,7 @@ export function HomePageView({ stories, alerts = [] }: { stories: Story[]; alert
                           padding: '12px 20px',
                           background: 'transparent',
                           border: '1px solid #252836',
-                          color: '#2a2d3a',
+                          color: '#606478',
                           borderRadius: '2px',
                           fontFamily: "'Space Mono', monospace",
                           fontSize: '10px',
@@ -1220,7 +1220,7 @@ export function HomePageView({ stories, alerts = [] }: { stories: Story[]; alert
                       <div style={{
                         fontFamily: "'Space Mono', monospace",
                         fontSize: '9px',
-                        color: '#1e2030',
+                        color: '#555870',
                         marginTop: '8px',
                         letterSpacing: '0.1em',
                       }}>
@@ -1247,7 +1247,7 @@ export function HomePageView({ stories, alerts = [] }: { stories: Story[]; alert
           <span style={{
             fontFamily: "'Space Mono', monospace",
             fontSize: '9px',
-            color: '#1e2030',
+            color: '#555870',
             letterSpacing: '0.15em',
           }}>
             NEWSHIVE · INTELLIGENCE TRACKING · CC BY 4.0
@@ -1255,7 +1255,7 @@ export function HomePageView({ stories, alerts = [] }: { stories: Story[]; alert
           <span style={{
             fontFamily: "'Space Mono', monospace",
             fontSize: '9px',
-            color: '#1e2030',
+            color: '#555870',
             letterSpacing: '0.1em',
           }}>
             AI · VR/AR · SEO · VIBE CODING · CROSS-DOMAIN
